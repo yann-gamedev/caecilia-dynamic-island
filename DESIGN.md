@@ -22,9 +22,10 @@ Prototipe interaktif (referensi visual): artifact **Notch Island** di claude.ai.
 - **Unit: DIP** (device-independent pixel). 1 DIP = 1 px pada 96 dpi (scaling 100%). Pada 150%, 1 DIP = 1.5 px.
 - Panggil `ID2D1DeviceContext::SetDpi(dpi, dpi)` dengan nilai dari `GetDpiForWindow`, lalu pakai semua angka di dokumen ini apa adanya.
 - **Origin lokal** = pojok kiri-atas **body** island. Ear kiri berada di `x ∈ [−e, 0]`, ear kanan di `x ∈ [W, W + e]`.
-- **Origin layar island**: `left = floor((lebarMonitorDip − W) / 2)`, `top = 0` (tepi atas monitor, bukan work area, karena island menempel ke bezel).
+- **Anchor window**: window tetap 492 × 193 DIP. Offset X dari tepi kiri monitor adalah `floor((lebarMonitorDip − 492) × 0.5)` DIP; konversi offset ke piksel lalu tambahkan `rcMonitor.left`. Screen Y = `rcMonitor.top`, bukan `rcWork.top`.
+- **Origin body dalam window**: `x = windowCenterX − W × 0.5`, `y = 0` DIP. Contoh screen rect @1920 mengasumsikan monitor 1920 DIP dengan origin (0, 0).
 - **`D2D1_RECT_F` = `{ left, top, right, bottom }`**, bukan `{ x, y, w, h }`. Semua tabel mencantumkan kedua bentuk.
-- Setelah dikali DPI, bulatkan tepi rect ke piksel utuh agar rim 1 DIP tetap tajam.
+- Semua stroke tetap dalam DIP, termasuk lens/debug 1 DIP dan rim 2 DIP yang di-mask sehingga hanya 1 DIP sisi dalam terlihat. Jangan membulatkan setiap tepi geometri ke piksel; konversi/pembulatan piksel hanya untuk penempatan dan ukuran window/swap chain.
 
 ---
 
@@ -100,8 +101,16 @@ Screen X @1920 = local X + 880.
 | Island body | 0 | 0 | 160 | 28 | 12 | `{0, 0, 160, 28}` | Core | Bottom corners: continuous curve, see geometry recipe |
 | Left ear (concave) | -8 | 0 | 8 | 8 | 8 | `{-8, 0, 0, 8}` | Core | Arc center (−e, e) |
 | Right ear (concave) | 160 | 0 | 8 | 8 | 8 | `{160, 0, 168, 8}` | Core | Arc center (W + e, e) |
-| Camera lens | 76 | 10 | 8 | 8 | 4 | `{76, 10, 84, 18}` | Camera lens | 1px stroke in Lens ring |
-| Status dot | 138 | 11 | 6 | 6 | 3 | `{138, 11, 144, 17}` | Aqua | Opacity 0.85, sky glow |
+| Camera lens | 76 | 10 | 8 | 8 | 4 | `{76, 10, 84, 18}` | Camera lens | 1 DIP stroke in Lens ring |
+| Status dot | 138 | 11 | 6 | 6 | 3 | `{138, 11, 144, 17}` | Aqua | Opacity aktif 0.85, idle 0.35; sky glow hanya saat aktif |
+
+### Debug HUD — `namespace DebugHud`
+
+- `FpsRect = {8, 6, 64, 17}` dalam koordinat body (56 × 11 DIP).
+- Micro label: Segoe UI Variable Small, 9.5 DIP, weight 600, line height 11 DIP, tracking +0.6 DIP, kapital, **tabular figures**, rata kiri (LTR), paragraph top, tanpa wrap.
+- FPS aktif memakai `Color::Aqua` dengan alpha dikali 0.75. Saat render loop berhenti, tampil `IDLE` dengan `Color::Label3` langsung (alpha 0.30, **bukan** dikali 0.30 lagi).
+- `showDebugFps = false` default; toggle `Ctrl+Shift+F`. Tidak ada timer render hanya untuk menghitung FPS; label idle tidak membuat renderer terus berjalan.
+- Bounding debug default mati dan toggle terpisah `Ctrl+Alt+F12`: stroke 1 DIP Aqua untuk semua rect elemen M0, termasuk `Idle::Body`, `Idle::LeftEar`, `Idle::RightEar`, lens/status dan `DebugHud::FpsRect`. Rect body/ear diturunkan dari `kGeomIdle`, bukan outline alternatif.
 
 ### Compact media — `namespace Compact`
 
@@ -197,7 +206,7 @@ Screen X @1920 = local X + 760.
 | Tab · Telemetry | 100 | 12 | 84 | 22 | — | `{100, 12, 184, 34}` | Label primary | Label centered, 11/600 |
 | Tab · Drop Tray | 184 | 12 | 84 | 22 | — | `{184, 12, 268, 34}` | Label primary | Label centered, 11/600 |
 | Clock | 304 | 12 | 80 | 22 | — | `{304, 12, 384, 34}` | Label secondary | Right-aligned, 11/600 tabular |
-| Drop zone | 16 | 46 | 368 | 88 | 16 | `{16, 46, 384, 134}` | Control fill | Dashed 1px Label tertiary, dash 4 / gap 3 |
+| Drop zone | 16 | 46 | 368 | 88 | 16 | `{16, 46, 384, 134}` | Control fill | Dashed 1 DIP Label tertiary, dash 4 / gap 3 |
 | File tile 1 | 29 | 58 | 106 | 64 | 10 | `{29, 58, 135, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
 | File tile 2 | 147 | 58 | 106 | 64 | 10 | `{147, 58, 253, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
 | File tile 3 | 265 | 58 | 106 | 64 | 10 | `{265, 58, 371, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
@@ -251,10 +260,10 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 |---|---|--:|---|---|---|
 | Core (`Color::Core`) | `#000000` | 1.00 | `rgba(0, 0, 0, 1)` | `{ 0.000f, 0.000f, 0.000f, 1.000f }` | Surface for Dormant, Compact and HUD. Matches the bezel. |
 | Obsidian (`Color::Obsidian`) | `#0C0C0E` | 0.92 | `rgba(12, 12, 14, 0.92)` | `{ 0.047f, 0.047f, 0.055f, 0.920f }` | Surface for Expanded. Interpolated from Core by the "mix" spring. |
-| Specular rim (`Color::Rim`) | `#FFFFFF` | 0.12 | `rgba(255, 255, 255, 0.12)` | `{ 1.000f, 1.000f, 1.000f, 0.120f }` | 1px inner border. Alpha 0.12 at y = 0 fading to 0.04 at y = H. Scaled by the "rim" spring. |
+| Specular rim (`Color::Rim`) | `#FFFFFF` | 0.12 | `rgba(255, 255, 255, 0.12)` | `{ 1.000f, 1.000f, 1.000f, 0.120f }` | 1 DIP inner border. Alpha 0.12 at y = 0 fading to 0.04 at y = H. Scaled by the "rim" spring. |
 | Aqua (`Color::Aqua`) | `#00FFFF` | 1.00 | `rgba(0, 255, 255, 1)` | `{ 0.000f, 1.000f, 1.000f, 1.000f }` | Accent gradient start (top of bars, status dot). |
 | Sky (`Color::Sky`) | `#38BDF8` | 1.00 | `rgba(56, 189, 248, 1)` | `{ 0.220f, 0.741f, 0.973f, 1.000f }` | Primary accent: progress fills, rings, gradient end. |
-| Sky glow (`Color::Glow`) | `#38BDF8` | 0.45 | `rgba(56, 189, 248, 0.45)` | `{ 0.220f, 0.741f, 0.973f, 0.450f }` | Glow behind accent marks. Gaussian blur σ ≈ 3 DIP. |
+| Sky glow (`Color::Glow`) | `#38BDF8` | 0.45 | `rgba(56, 189, 248, 0.45)` | `{ 0.220f, 0.741f, 0.973f, 0.450f }` | Glow behind accent marks. Gaussian blur σ = 3 DIP. |
 | Label primary (`Color::Label`) | `#F5F5F7` | 1.00 | `rgba(245, 245, 247, 1)` | `{ 0.961f, 0.961f, 0.969f, 1.000f }` | Titles, values, glyphs. |
 | Label secondary (`Color::Label2`) | `#EBEBF5` | 0.60 | `rgba(235, 235, 245, 0.6)` | `{ 0.922f, 0.922f, 0.961f, 0.600f }` | Artist, clock, secondary values. |
 | Label tertiary (`Color::Label3`) | `#EBEBF5` | 0.30 | `rgba(235, 235, 245, 0.3)` | `{ 0.922f, 0.922f, 0.961f, 0.300f }` | Micro labels, timestamps, dashed tray stroke. |
@@ -262,12 +271,13 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 | Selected pill (`Color::Pill`) | `#FFFFFF` | 0.16 | `rgba(255, 255, 255, 0.16)` | `{ 1.000f, 1.000f, 1.000f, 0.160f }` | Active tab pill, pressed button. |
 | Track (`Color::Track`) | `#FFFFFF` | 0.14 | `rgba(255, 255, 255, 0.14)` | `{ 1.000f, 1.000f, 1.000f, 0.140f }` | Progress and ring tracks. |
 | Camera lens (`Color::Lens`) | `#0A0A12` | 1.00 | `rgba(10, 10, 18, 1)` | `{ 0.039f, 0.039f, 0.071f, 1.000f }` | Dormant camera glyph fill. |
-| Lens ring (`Color::LensRing`) | `#1C1C26` | 1.00 | `rgba(28, 28, 38, 1)` | `{ 0.110f, 0.110f, 0.149f, 1.000f }` | Dormant camera glyph 1px stroke. |
+| Lens ring (`Color::LensRing`) | `#1C1C26` | 1.00 | `rgba(28, 28, 38, 1)` | `{ 0.110f, 0.110f, 0.149f, 1.000f }` | Dormant camera glyph 1 DIP stroke. |
 | Focus orange (`Color::Focus`) | `#FF9F0A` | 1.00 | `rgba(255, 159, 10, 1)` | `{ 1.000f, 0.624f, 0.039f, 1.000f }` | Pomodoro ring and time. |
 | Drop shadow (`Color::Shadow`) | `#000000` | 0.55 | `rgba(0, 0, 0, 0.55)` | `{ 0.000f, 0.000f, 0.000f, 0.550f }` | Offset (0, 12), blur 32. Scaled by the "shadow" spring. |
 
 - Gradien aksen: **Aqua → Sky** (horizontal untuk bar progres, vertikal atas→bawah untuk wave bar).
-- Glow: drop shadow warna `Sky glow`, blur ≈ 3 DIP (σ), offset 0. Hanya pada elemen aksen yang aktif.
+- Glow: drop shadow warna `Sky glow`, blur 3 DIP (σ), offset (0, 0). Hanya pada elemen aksen yang aktif.
+- Clear swap chain: `Color::Transparent = {0, 0, 0, 0}`. Semua alpha brush adalah straight alpha.
 - Kontras: semua teks Label primary/secondary di atas Core/Obsidian lolos WCAG AA. Label tertiary hanya untuk label mikro dan timestamp, bukan informasi penting.
 
 ---
@@ -289,7 +299,10 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 - Angka yang berubah (jam, persentase, waktu) wajib **tabular figures**: `DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES`.
 - Antialias teks: `D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE`. ClearType tidak bekerja di permukaan transparan.
 - Teks yang terlalu panjang: trimming `DWRITE_TRIMMING_GRANULARITY_CHARACTER` dengan ellipsis sign.
-- Tracking dalam tabel adalah DIP (letter-spacing). DirectWrite tidak punya tracking langsung: pakai `IDWriteTextLayout1::SetCharacterSpacing`.
+- Tracking dalam tabel adalah DIP (letter-spacing). Pakai `IDWriteTextLayout1::SetCharacterSpacing`, separuh tracking di leading dan separuh di trailing; minimum advance 0.
+- Semua role dibuat melalui DirectWrite dan diperiksa terhadap system font collection. Jika family pilihan (termasuk Georgia) tidak tersedia, gunakan Segoe UI yang juga diperiksa; kegagalan HRESULT atau ketiadaan fallback dilaporkan, bukan diabaikan.
+- Line height memakai uniform line spacing sesuai tabel. Baseline berasal dari font yang benar-benar dipilih: `ascentDip + (lineHeight − ascentDip − descentDip) × 0.5`, dengan ascent/descent diskalakan dari `designUnitsPerEm`; tidak ada baseline tebakan atau tambahan line gap.
+- Konstanta typography mencakup seluruh tabel (family, size, weight, lineHeight, tracking, tabular, capitals, color). Role tab/clock mengaktifkan tabular untuk jam; DebugHud mengoverride micro label menjadi tabular. Locale layout `en-US`, reading direction LTR.
 
 ---
 
@@ -352,10 +365,21 @@ Area hit-test = geometri island saat ini (`ID2D1Geometry::FillContainsPoint`), b
 ## 10. Checklist verifikasi visual
 
 - [ ] Pada 100% dan 150% scaling, screenshot island cocok dengan prototipe (overlay di atas screenshot prototipe zoom 1×/1.5×, selisih ≤ 1 px).
-- [ ] Debug overlay (toggle `Ctrl+Alt+F12`) menggambar semua rect di Bagian 5 dengan stroke 1 px Aqua, dan semua elemen jatuh tepat di dalamnya.
+- [ ] Debug overlay (toggle `Ctrl+Alt+F12`) menggambar rect elemen yang diimplementasikan di Bagian 5 dengan stroke 1 DIP Aqua. FPS/IDLE ditoggle terpisah dengan `Ctrl+Shift+F` dan default mati.
 - [ ] Dormant tidak punya rim, tidak punya shadow, dan tidak terlihat garis di tepi atas layar.
 - [ ] Saat overshoot `ToHud` (5.2%), sudut bawah tidak menembus ear.
 - [ ] Angka jam/persentase tidak "bergoyang" lebarnya (tabular figures aktif).
+
+---
+
+## 11. Keputusan final M0
+
+- DESIGN dan Lampiran A adalah sumber angka untuk M0; header harus identik dengan blok kode Lampiran A. `BuildIslandGeometry`, parameter state, serta nilai/integrator pegas asli tidak berubah.
+- Window tetap 492 × 193 DIP, top lokal 0, half 0.5, DPI dasar 96 (`WindowSpec`). Body terpusat di dalam window; window terpusat terhadap `rcMonitor`, tidak terhadap work area.
+- `PaintSpec` menamai zero/unit untuk konversi semantik, lens/debug stroke 1 DIP, rim stroke 2 DIP di-mask ke sisi dalam, rim bottom alpha 0.04, glow sigma 3 DIP / offset (0, 0), shadow offset (0, 12) / blur 32 DIP, dan opacity dot aktif/idle 0.85/0.35. Nilai ini tidak diperlakukan sebagai piksel fisik.
+- Dormant M0: Core hitam, lens dengan ring, status dot idle 0.35 tanpa glow, tanpa rim/shadow. M0 memakai elemen DESIGN saja; highlight lensa dekoratif dari HTML tidak diimpor. Izin memakai HTML tidak menambah dekorasi yang tidak tercantum dalam keputusan ini.
+- Debug bounds dan FPS adalah dua toggle independen dan default mati; detail layout/warna ada pada Bagian 5. Tidak ada angka FPS palsu saat renderer berhenti: tampil `IDLE` ketika debug FPS diaktifkan.
+- DirectWrite memakai WRL `ComPtr`, tanpa dependency C++/WinRT untuk teks. Painter memilih grayscale antialias dan warna; `TextStyles::IdleLayout()` menghasilkan layout lokal sebesar `FpsRect`, digambar pada origin rect tersebut.
 
 ---
 
@@ -371,6 +395,8 @@ Header ini adalah terjemahan langsung dari tabel di atas. Taruh di `src/spec/Not
 // D2D1_RECT_F is { left, top, right, bottom } — NOT { x, y, w, h }.
 #pragma once
 #include <d2d1.h>
+#include <dwrite.h>
+#include <array>
 #include <algorithm>
 #include <cmath>
 
@@ -382,9 +408,35 @@ constexpr IslandGeom kGeomCompact { 240.0f, 34.0f, 17.0f, 9.0f, 0.0f, 0.5f, 0.25
 constexpr IslandGeom kGeomExpanded { 400.0f, 145.0f, 28.0f, 14.0f, 1.0f, 1.0f, 1.0f };
 constexpr IslandGeom kGeomHud { 200.0f, 44.0f, 22.0f, 10.0f, 0.0f, 0.75f, 0.4f };
 
-// Screen anchor: left = floor((monitorWidthDip - geom.width) / 2), top = monitor work-area top (0).
+namespace WindowSpec {
+  constexpr float Width = 492.0f;
+  constexpr float Height = 193.0f;
+  constexpr float Top = 0.0f;
+  constexpr float Half = 0.5f;
+  constexpr float DpiBase = 96.0f;
+}
+// Window x relative to rcMonitor.left: floor((monitorWidthDip - WindowSpec::Width) * WindowSpec::Half).
+// Convert that offset to physical pixels; screen y = rcMonitor.top (never rcWork.top).
+// Body origin in window DIPs: {windowCenterX - geom.width * WindowSpec::Half, WindowSpec::Top}.
+namespace PaintSpec {
+  constexpr float Zero = 0.0f;
+  constexpr float Unit = 1.0f;
+  constexpr float LensStroke = 1.0f;
+  constexpr float DebugStroke = 1.0f;
+  constexpr float RimStroke = 2.0f; // Geometric mask leaves 1 DIP inside.
+  constexpr float RimBottomAlpha = 0.04f;
+  constexpr float GlowSigma = 3.0f;
+  constexpr D2D1_POINT_2F GlowOffset = { Zero, Zero };
+  constexpr D2D1_POINT_2F ShadowOffset = { Zero, 12.0f };
+  constexpr float ShadowBlur = 32.0f;
+  constexpr float DotOpacityActive = 0.85f;
+  constexpr float DotOpacityIdle = 0.35f;
+}
 
 namespace Idle {
+  constexpr D2D1_RECT_F Body = { WindowSpec::Top, WindowSpec::Top, kGeomIdle.width, kGeomIdle.height };
+  constexpr D2D1_RECT_F LeftEar = { -kGeomIdle.earRadius, WindowSpec::Top, WindowSpec::Top, kGeomIdle.earRadius };
+  constexpr D2D1_RECT_F RightEar = { kGeomIdle.width, WindowSpec::Top, kGeomIdle.width + kGeomIdle.earRadius, kGeomIdle.earRadius };
   constexpr D2D1_ROUNDED_RECT Lens = { { 76.0f, 10.0f, 84.0f, 18.0f }, 4.0f, 4.0f }; // Camera lens
   constexpr D2D1_ROUNDED_RECT Status = { { 138.0f, 11.0f, 144.0f, 17.0f }, 3.0f, 3.0f }; // Status dot
 }
@@ -468,6 +520,7 @@ namespace HudPomodoro {
 }
 
 namespace Color { // straight (non-premultiplied) alpha
+  constexpr D2D1_COLOR_F Transparent = { 0.000f, 0.000f, 0.000f, 0.000f }; // Swap-chain clear
   constexpr D2D1_COLOR_F Core = { 0.000f, 0.000f, 0.000f, 1.000f }; // #000000 @ 1
   constexpr D2D1_COLOR_F Obsidian = { 0.047f, 0.047f, 0.055f, 0.920f }; // #0C0C0E @ 0.92
   constexpr D2D1_COLOR_F Rim = { 1.000f, 1.000f, 1.000f, 0.120f }; // #FFFFFF @ 0.12
@@ -484,6 +537,44 @@ namespace Color { // straight (non-premultiplied) alpha
   constexpr D2D1_COLOR_F LensRing = { 0.110f, 0.110f, 0.149f, 1.000f }; // #1C1C26 @ 1
   constexpr D2D1_COLOR_F Focus = { 1.000f, 0.624f, 0.039f, 1.000f }; // #FF9F0A @ 1
   constexpr D2D1_COLOR_F Shadow = { 0.000f, 0.000f, 0.000f, 0.550f }; // #000000 @ 0.55
+}
+
+namespace Typography {
+  enum class Role : std::size_t { TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue, Count };
+  struct Style {
+    const wchar_t* family;
+    float size;
+    DWRITE_FONT_WEIGHT weight;
+    float lineHeight;
+    float tracking;
+    bool tabular;
+    bool capitals;
+    D2D1_COLOR_F color;
+  };
+  constexpr wchar_t FallbackFamily[] = L"Segoe UI";
+  constexpr wchar_t Locale[] = L"en-US";
+  constexpr Style TabClock = { L"Segoe UI Variable Text", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0f, 0.1f, true, false, Color::Label };
+  constexpr Style MediaTitle = { L"Georgia", 15.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 18.0f, -0.2f, false, false, Color::Label };
+  constexpr Style Artist = { L"Segoe UI Variable Text", 12.0f, DWRITE_FONT_WEIGHT_MEDIUM, 14.0f, 0.0f, false, false, Color::Label2 };
+  constexpr Style Timestamp = { L"Segoe UI Variable Text", 10.0f, DWRITE_FONT_WEIGHT_MEDIUM, 11.0f, 0.0f, true, false, Color::Label3 };
+  constexpr Style TelemetryValue = { L"Segoe UI Variable Display", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 12.0f, 0.0f, true, false, Color::Label };
+  constexpr Style MicroLabel = { L"Segoe UI Variable Small", 9.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 11.0f, 0.6f, false, true, Color::Label3 };
+  constexpr Style HudValue = { L"Segoe UI Variable Display", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 16.0f, 0.0f, true, false, Color::Label };
+  constexpr std::array<Style, static_cast<std::size_t>(Role::Count)> Styles = {
+    TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue
+  };
+}
+namespace DebugHud {
+  constexpr D2D1_RECT_F FpsRect = { 8.0f, 6.0f, 64.0f, 17.0f }; // Body-local, 56 x 11 DIP.
+  constexpr Typography::Role TextRole = Typography::Role::MicroLabel;
+  constexpr bool Tabular = true;
+  constexpr DWRITE_TEXT_ALIGNMENT Alignment = DWRITE_TEXT_ALIGNMENT_LEADING; // Left, LTR.
+  constexpr float ActiveOpacity = 0.75f;
+  constexpr D2D1_COLOR_F ActiveColor = { Color::Aqua.r, Color::Aqua.g, Color::Aqua.b, Color::Aqua.a * ActiveOpacity };
+  constexpr D2D1_COLOR_F IdleColor = Color::Label3; // Alpha 0.30 exactly once.
+  constexpr wchar_t IdleText[] = L"IDLE";
+  constexpr bool ShowDebugFpsDefault = false; // Ctrl+Shift+F; independent of Ctrl+Alt+F12 bounds.
+  constexpr bool ShowBoundsDefault = false;
 }
 
 struct SpringParams { float stiffness, damping, mass; };

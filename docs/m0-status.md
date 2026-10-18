@@ -1,76 +1,71 @@
-# M0 — preparation status
+# M0 — implementation and handoff
 
-## Completed
+## Implemented
 
-- Read PRD.md and DESIGN.md in full, including Appendix A.
-- Inspected the HTML prototype's data, layout, and C++ export generator.
-- Copied DESIGN Appendix A verbatim into `src/spec/NotchIslandSpec.h`.
-- Added `tools/verify-spec.cjs`: offline comparison with DESIGN and HTML export.
-- Kept original requirements and HTML unchanged.
+- C++20 MSVC-only CMake project with `/W4 /WX`, no dependency downloads.
+- Required non-activating/topmost/tool/layered/no-redirection popup, single instance.
+- Fixed 492 × 193 DIP client envelope; primary `rcMonitor` top/center positioning.
+- Per-monitor DPI v2, WM_DPICHANGED / WM_DISPLAYCHANGE repositioning, SetDpi drawing.
+- D3D11 + premultiplied DXGI composition flip swap chain + DirectComposition + D2D.
+- Shared cached spec geometry for surface, content clipping, and FillContainsPoint.
+- WM_NCHITTEST HTCLIENT only inside shape; HTTRANSPARENT elsewhere.
+- Raw mouse input plus inside/outside WS_EX_TRANSPARENT toggling across applications.
+- Dormant Core surface, lens/ring, status dot with approved idle/active opacity,
+  clipped glow; no surface rim/drop shadow.
+- Independent Ctrl+Alt+F12 bounds and Ctrl+Shift+F FPS toggles, command-line fallbacks.
+- Debug FPS uses the specified micro-label IDLE layout and has no periodic repaint.
+- Static deterministic `--demo`; optional `--demo-media-active` for dot verification.
+- Device recreation for D2DERR_RECREATE_TARGET / DXGI device removed/reset/hung;
+  bounded retries avoid a GPU-error busy loop; resume tears down/rebuilds resources.
+- DirectWrite seven-role formats, checked font fallback, metrics-derived baseline,
+  tracking and tabular figures for debug layout.
+- Updated DESIGN Appendix A/spec and PRD debug wording from final user decisions.
 
-The HTML export agrees numerically with the header for state geometry, element
-rectangles, colors, and springs; its geometry builder also agrees. Some exported
-symbol names and comments differ, so the required DESIGN copy is preserved.
+## Checks actually executed
 
-## Decisions still required before overlay implementation
+- PASS: `node tools/verify-spec.cjs` — Appendix A equality and original HTML values.
+- PASS: all C++ translation units with supplemental MinGW `-fsyntax-only`, C++20,
+  `-Wall -Wextra -Wconversion -Werror`.
+- PASS: supplemental MinGW geometry executable — body hit, outside non-hit,
+  envelope bounds, all state path construction and zero-ear case.
+- MSVC build, `/W4` warning verification, app runtime rendering and screenshots:
+  **not executed**. Standard `vswhere.exe` / VS 2022 `vcvars64.bat` locations checked;
+  toolchain not found. Per user instruction, implementation continued for local handoff.
 
-1. **Incomplete exported constants.** Neither Appendix A nor the HTML C++ exporter
-   supplies named constants for the fixed window envelope, lens/debug stroke,
-   status opacity, glow blur, or typography. Some are specified elsewhere in
-   DESIGN but the hard rule allows visual numbers only in the spec header.
-   Permission is needed to extend DESIGN Appendix A and the header together.
-2. **Anchor conflict.** DESIGN section 2 specifies monitor top, not work area;
-   the header and HTML export comment say work-area top. Confirm monitor top and
-   authorize correcting the comment in the relevant sources.
-3. **Physical px versus DIP.** Lens and debug strokes are described as 1 px,
-   while the global unit is DIP. Confirm whether these remain one physical pixel
-   at non-100% scaling or are one DIP.
-4. **Debug FPS layout.** Neither document nor HTML specifies the FPS rect,
-   typography role, color, and idle reporting behavior. These cannot be guessed.
-5. **Dormant status discrepancy.** DESIGN section 5 / HTML layout metadata say
-   opacity 0.85; HTML `IslandContent` uses 0.35 when media is not playing. Confirm
-   the intended M0 Dormant appearance and whether the prototype's extra lens
-   highlight (absent from DESIGN) should be excluded.
-6. **Cross-process click-through.** `HTTRANSPARENT` alone forwards hit testing
-   only within the same thread. Approve an additional mechanism to meet the
-   cross-application requirement; it must preserve the transparent composition
-   envelope for future shadow rendering.
+The supplemental compiler is not the supported distribution toolchain.
 
-## Local toolchain observations
+## Windows 11 acceptance checklist
 
-- CMake 4.2.3 and Node.js 24.15.0 are available.
-- Initial PATH/default-install/registry checks did not locate MSVC, Visual Studio
-  Installer, an official Windows SDK, or C++/WinRT.
-- MinGW is available but is not an authorized substitute for the required MSVC
-  build. A custom toolchain location or offline installation is needed.
-- No dependencies have been downloaded and no network requests are made by the
-  verification script.
+Run build commands in README, then verify:
 
-## Planned M0 files after clarification
+- [ ] Debug and Release MSVC builds and CTest pass without warnings.
+- [ ] Static Dormant appears at physical monitor top center at 100% and 150%.
+- [ ] Bounds match body, ears, lens, status and optional FPS rect from DESIGN.
+- [ ] Dot idle .35 and demo-active .85 match approved spec; IDLE alpha is .30 once.
+- [ ] Composition background remains transparent with required combined styles.
+- [ ] Clicks outside shape reach Notepad/Explorer (different process), including
+      rapid boundary crossings; inside clicks do not activate overlay.
+- [ ] Debug toggle hotkeys work or command-line fallback works on hotkey collision.
+- [ ] Raw input outside the shape does not produce Presents; stationary idle sleeps.
+- [ ] Second instance exits without stealing focus or creating a second overlay.
+- [ ] DPI, resolution, primary display and taskbar-at-top changes anchor correctly.
+- [ ] `--verify-device-recovery` produces a second valid frame after resource reset.
+- [ ] Actual D2D/DXGI device loss, resume, and display changes recover without crash.
 
-- `CMakeLists.txt`: C++20, MSVC `/W4`, offline dependencies.
-- `src/main.cpp`: DPI v2, single-instance mutex, error boundary, message loop.
-- `src/app/App.{h,cpp}`: module wiring and event-driven redraw requests.
-- `src/window/OverlayWindow.{h,cpp}`: required styles, no activation, monitor
-  positioning, DPI/display changes, shape hit testing.
-- `src/render/Renderer.{h,cpp}`: D3D11 / premultiplied flip-model composition swap
-  chain / DirectComposition / D2D 1.1, resource recovery on device loss.
-- `src/render/IslandGeometry.{h,cpp}`: call the spec builder and cache the path.
-- `src/render/Painter.{h,cpp}`: static Dormant and debug rectangles.
-- `src/render/TextStyles.{h,cpp}`: confirmed debug text style and font fallback.
-- `src/data/DemoSource.{h,cpp}`: deterministic M0-only demo input.
+## Known boundaries
 
-## M0 acceptance checks — not yet run
+- M1 motion/hover/state transitions and demo 1–4/V/B/P are intentionally absent.
+- Media/telemetry/system watchers/tray/menu/autostart/drop tray belong to M2–M4.
+- No recurring FPS readout is needed in static M0: the final frame says IDLE.
+- Config is read only from explicit `--config`; no network or implicit persistence.
+- `--verify-device-recovery` tests teardown/rebuild, not hardware device-loss injection.
+- Raw input is asynchronous: the specified style toggle cannot mathematically
+  guarantee zero click race during every rapid mouse boundary crossing.
+- Combined WS_EX_LAYERED / WS_EX_NOREDIRECTIONBITMAP / DirectComposition behavior
+  requires real DWM/driver validation. No silent fallback to another UI stack.
+- On persistent device loss, retries pause after the bounded budget; a new paint,
+  display/resume event, or debug toggle can initiate recovery again.
+- No measurements are invented; see `docs/perf.md`.
 
-- [ ] MSVC build at `/W4`, no new warnings.
-- [ ] `--demo` displays static Dormant at monitor top center.
-- [ ] Correct body, ears, lens, and status rectangles with Ctrl+Alt+F12.
-- [ ] Debug FPS obeys confirmed spec and does not force idle presents.
-- [ ] Visual comparison at 100% and 150%, with at most 1 px difference.
-- [ ] Clicks outside shape reach a different application; shape remains interactive.
-- [ ] Never activates or appears in taskbar; second instance exits safely.
-- [ ] DPI/display changes reposition correctly without per-frame HWND resizing.
-- [ ] No repeated Present while unchanged; blocking idle message loop.
-- [ ] Device-loss recreation, sleep/resume, resolution-change checks.
-
-M0 is **not complete**. No performance numbers are available yet.
+M0 source is ready for local build/testing, but acceptance is pending. Stop here;
+do not start M1 without user confirmation.

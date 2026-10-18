@@ -5,6 +5,8 @@
 // D2D1_RECT_F is { left, top, right, bottom } — NOT { x, y, w, h }.
 #pragma once
 #include <d2d1.h>
+#include <dwrite.h>
+#include <array>
 #include <algorithm>
 #include <cmath>
 
@@ -16,9 +18,35 @@ constexpr IslandGeom kGeomCompact { 240.0f, 34.0f, 17.0f, 9.0f, 0.0f, 0.5f, 0.25
 constexpr IslandGeom kGeomExpanded { 400.0f, 145.0f, 28.0f, 14.0f, 1.0f, 1.0f, 1.0f };
 constexpr IslandGeom kGeomHud { 200.0f, 44.0f, 22.0f, 10.0f, 0.0f, 0.75f, 0.4f };
 
-// Screen anchor: left = floor((monitorWidthDip - geom.width) / 2), top = monitor work-area top (0).
+namespace WindowSpec {
+  constexpr float Width = 492.0f;
+  constexpr float Height = 193.0f;
+  constexpr float Top = 0.0f;
+  constexpr float Half = 0.5f;
+  constexpr float DpiBase = 96.0f;
+}
+// Window x relative to rcMonitor.left: floor((monitorWidthDip - WindowSpec::Width) * WindowSpec::Half).
+// Convert that offset to physical pixels; screen y = rcMonitor.top (never rcWork.top).
+// Body origin in window DIPs: {windowCenterX - geom.width * WindowSpec::Half, WindowSpec::Top}.
+namespace PaintSpec {
+  constexpr float Zero = 0.0f;
+  constexpr float Unit = 1.0f;
+  constexpr float LensStroke = 1.0f;
+  constexpr float DebugStroke = 1.0f;
+  constexpr float RimStroke = 2.0f; // Geometric mask leaves 1 DIP inside.
+  constexpr float RimBottomAlpha = 0.04f;
+  constexpr float GlowSigma = 3.0f;
+  constexpr D2D1_POINT_2F GlowOffset = { Zero, Zero };
+  constexpr D2D1_POINT_2F ShadowOffset = { Zero, 12.0f };
+  constexpr float ShadowBlur = 32.0f;
+  constexpr float DotOpacityActive = 0.85f;
+  constexpr float DotOpacityIdle = 0.35f;
+}
 
 namespace Idle {
+  constexpr D2D1_RECT_F Body = { WindowSpec::Top, WindowSpec::Top, kGeomIdle.width, kGeomIdle.height };
+  constexpr D2D1_RECT_F LeftEar = { -kGeomIdle.earRadius, WindowSpec::Top, WindowSpec::Top, kGeomIdle.earRadius };
+  constexpr D2D1_RECT_F RightEar = { kGeomIdle.width, WindowSpec::Top, kGeomIdle.width + kGeomIdle.earRadius, kGeomIdle.earRadius };
   constexpr D2D1_ROUNDED_RECT Lens = { { 76.0f, 10.0f, 84.0f, 18.0f }, 4.0f, 4.0f }; // Camera lens
   constexpr D2D1_ROUNDED_RECT Status = { { 138.0f, 11.0f, 144.0f, 17.0f }, 3.0f, 3.0f }; // Status dot
 }
@@ -102,6 +130,7 @@ namespace HudPomodoro {
 }
 
 namespace Color { // straight (non-premultiplied) alpha
+  constexpr D2D1_COLOR_F Transparent = { 0.000f, 0.000f, 0.000f, 0.000f }; // Swap-chain clear
   constexpr D2D1_COLOR_F Core = { 0.000f, 0.000f, 0.000f, 1.000f }; // #000000 @ 1
   constexpr D2D1_COLOR_F Obsidian = { 0.047f, 0.047f, 0.055f, 0.920f }; // #0C0C0E @ 0.92
   constexpr D2D1_COLOR_F Rim = { 1.000f, 1.000f, 1.000f, 0.120f }; // #FFFFFF @ 0.12
@@ -118,6 +147,44 @@ namespace Color { // straight (non-premultiplied) alpha
   constexpr D2D1_COLOR_F LensRing = { 0.110f, 0.110f, 0.149f, 1.000f }; // #1C1C26 @ 1
   constexpr D2D1_COLOR_F Focus = { 1.000f, 0.624f, 0.039f, 1.000f }; // #FF9F0A @ 1
   constexpr D2D1_COLOR_F Shadow = { 0.000f, 0.000f, 0.000f, 0.550f }; // #000000 @ 0.55
+}
+
+namespace Typography {
+  enum class Role : std::size_t { TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue, Count };
+  struct Style {
+    const wchar_t* family;
+    float size;
+    DWRITE_FONT_WEIGHT weight;
+    float lineHeight;
+    float tracking;
+    bool tabular;
+    bool capitals;
+    D2D1_COLOR_F color;
+  };
+  constexpr wchar_t FallbackFamily[] = L"Segoe UI";
+  constexpr wchar_t Locale[] = L"en-US";
+  constexpr Style TabClock = { L"Segoe UI Variable Text", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0f, 0.1f, true, false, Color::Label };
+  constexpr Style MediaTitle = { L"Georgia", 15.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 18.0f, -0.2f, false, false, Color::Label };
+  constexpr Style Artist = { L"Segoe UI Variable Text", 12.0f, DWRITE_FONT_WEIGHT_MEDIUM, 14.0f, 0.0f, false, false, Color::Label2 };
+  constexpr Style Timestamp = { L"Segoe UI Variable Text", 10.0f, DWRITE_FONT_WEIGHT_MEDIUM, 11.0f, 0.0f, true, false, Color::Label3 };
+  constexpr Style TelemetryValue = { L"Segoe UI Variable Display", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 12.0f, 0.0f, true, false, Color::Label };
+  constexpr Style MicroLabel = { L"Segoe UI Variable Small", 9.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 11.0f, 0.6f, false, true, Color::Label3 };
+  constexpr Style HudValue = { L"Segoe UI Variable Display", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 16.0f, 0.0f, true, false, Color::Label };
+  constexpr std::array<Style, static_cast<std::size_t>(Role::Count)> Styles = {
+    TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue
+  };
+}
+namespace DebugHud {
+  constexpr D2D1_RECT_F FpsRect = { 8.0f, 6.0f, 64.0f, 17.0f }; // Body-local, 56 x 11 DIP.
+  constexpr Typography::Role TextRole = Typography::Role::MicroLabel;
+  constexpr bool Tabular = true;
+  constexpr DWRITE_TEXT_ALIGNMENT Alignment = DWRITE_TEXT_ALIGNMENT_LEADING; // Left, LTR.
+  constexpr float ActiveOpacity = 0.75f;
+  constexpr D2D1_COLOR_F ActiveColor = { Color::Aqua.r, Color::Aqua.g, Color::Aqua.b, Color::Aqua.a * ActiveOpacity };
+  constexpr D2D1_COLOR_F IdleColor = Color::Label3; // Alpha 0.30 exactly once.
+  constexpr wchar_t IdleText[] = L"IDLE";
+  constexpr bool ShowDebugFpsDefault = false; // Ctrl+Shift+F; independent of Ctrl+Alt+F12 bounds.
+  constexpr bool ShowBoundsDefault = false;
 }
 
 struct SpringParams { float stiffness, damping, mass; };

@@ -124,7 +124,7 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 
 | ID | Kebutuhan | Prioritas |
 |---|---|---|
-| FR-60 | `Ctrl+Alt+F12` menampilkan overlay bounding box semua elemen (stroke 1 px Aqua) dan FPS. | P0 |
+| FR-60 | `Ctrl+Alt+F12` men-toggle bounding box semua elemen (stroke 1 DIP Aqua). `Ctrl+Shift+F` men-toggle FPS secara independen (`showDebugFps = false` default); saat renderer diam tampil `IDLE`, tanpa membangunkan render loop berkala. Layout dan warna mengikuti `DESIGN.md` DebugHud. | P0 |
 | FR-61 | Mode demo (`--demo`) yang memutar data palsu untuk semua state tanpa butuh media/telemetri nyata. | P0 |
 
 ## 7. Kebutuhan non-fungsional
