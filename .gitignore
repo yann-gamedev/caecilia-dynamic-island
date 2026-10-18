@@ -1,0 +1,20 @@
+# Local CMake / MSVC build output
+/build/
+/out/
+/.vs/
+/CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.pch
+
+# Locally provisioned dependencies (offline; do not commit packages)
+/packages/
+/vcpkg_installed/
+
+# Captures and machine-specific measurements
+/artifacts/
