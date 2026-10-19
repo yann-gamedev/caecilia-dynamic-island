@@ -4,6 +4,7 @@
 
 #include <iterator>
 #include <utility>
+#include <cwctype>
 
 namespace caecilia {
 namespace {
@@ -88,26 +89,44 @@ void TextStyles::Initialize()
     // Commit only after every role and its fallback have been validated.
     factory_ = std::move(factory);
     formats_ = std::move(formats);
-    idleLayout_.Reset();
+    layouts_.clear();
 }
 
 Microsoft::WRL::ComPtr<IDWriteTextLayout> TextStyles::IdleLayout()
 {
-    Check(factory_ ? S_OK : E_UNEXPECTED, "Initialize TextStyles before creating layouts");
-    if (idleLayout_) {
-        return idleLayout_;
-    }
+    return Layout(Spec::DebugHud::IdleText, Spec::DebugHud::TextRole,
+        Spec::DebugHud::FpsRect, Spec::DebugHud::Alignment,
+        DWRITE_PARAGRAPH_ALIGNMENT_NEAR, Spec::DebugHud::Tabular);
+}
 
-    constexpr auto role = static_cast<std::size_t>(Spec::DebugHud::TextRole);
-    constexpr auto style = Spec::Typography::Styles[role];
-    constexpr auto rect = Spec::DebugHud::FpsRect;
-    constexpr UINT32 length = static_cast<UINT32>(std::size(Spec::DebugHud::IdleText) - 1);
+ComPtr<IDWriteTextLayout> TextStyles::Layout(std::wstring_view text,
+    Spec::Typography::Role textRole, D2D1_RECT_F rect,
+    DWRITE_TEXT_ALIGNMENT alignment, DWRITE_PARAGRAPH_ALIGNMENT vertical,
+    bool forceTabular)
+{
+    Check(factory_ ? S_OK : E_UNEXPECTED, "Initialize TextStyles before creating layouts");
+    const auto role = static_cast<std::size_t>(textRole);
+    Check(role < formats_.size() ? S_OK : E_INVALIDARG, "Validate text role");
+    const auto& style = Spec::Typography::Styles[role];
+    std::wstring content(text);
+    if (style.capitals) {
+        for (auto& character : content) character = static_cast<wchar_t>(std::towupper(character));
+    }
+    const float width = rect.right - rect.left;
+    const float height = rect.bottom - rect.top;
+    const bool tabularFigures = style.tabular || forceTabular;
+    for (const auto& entry : layouts_) {
+        if (entry.text == content && entry.role == textRole && entry.width == width &&
+            entry.height == height && entry.alignment == alignment &&
+            entry.vertical == vertical && entry.tabular == tabularFigures) return entry.layout;
+    }
+    const UINT32 length = static_cast<UINT32>(content.size());
     const DWRITE_TEXT_RANGE range{ 0, length };
     ComPtr<IDWriteTextLayout> layout;
-    Check(factory_->CreateTextLayout(Spec::DebugHud::IdleText, length,
-        formats_[role].Get(), rect.right - rect.left, rect.bottom - rect.top,
-        layout.GetAddressOf()), "Create IDLE layout");
-    Check(layout->SetTextAlignment(Spec::DebugHud::Alignment), "Align debug text left");
+    Check(factory_->CreateTextLayout(content.c_str(), length,
+        formats_[role].Get(), width, height, layout.GetAddressOf()), "Create text layout");
+    Check(layout->SetTextAlignment(alignment), "Align text");
+    Check(layout->SetParagraphAlignment(vertical), "Align paragraph");
 
     ComPtr<IDWriteTextLayout1> layout1;
     Check(layout.As(&layout1), "Query text character-spacing interface");
@@ -116,7 +135,7 @@ Microsoft::WRL::ComPtr<IDWriteTextLayout> TextStyles::IdleLayout()
     Check(layout1->SetCharacterSpacing(spacing, spacing, Spec::PaintSpec::Zero, range),
         "Set debug text tracking");
 
-    if constexpr (Spec::DebugHud::Tabular) {
+    if (tabularFigures) {
         ComPtr<IDWriteTypography> typography;
         Check(factory_->CreateTypography(typography.GetAddressOf()), "Create debug typography");
         const DWRITE_FONT_FEATURE tabular{ DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, 1 };
@@ -124,9 +143,10 @@ Microsoft::WRL::ComPtr<IDWriteTextLayout> TextStyles::IdleLayout()
         Check(layout->SetTypography(typography.Get(), range), "Apply debug typography");
     }
 
-    // The painter supplies FpsRect's origin, IdleColor, and grayscale antialiasing.
-    idleLayout_ = std::move(layout);
-    return idleLayout_;
+    if (layouts_.size() == CacheCapacity) layouts_.pop_front();
+    layouts_.push_back({std::move(content), textRole, width, height, alignment,
+        vertical, tabularFigures, layout});
+    return layout;
 }
 
 } // namespace caecilia

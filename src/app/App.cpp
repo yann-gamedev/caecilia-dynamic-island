@@ -5,6 +5,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <cmath>
+#include <iterator>
 
 namespace caecilia {
 namespace {
@@ -65,18 +67,72 @@ App::~App() {
     window_.Close();
 }
 
+namespace {
+using namespace NotchIsland;
+bool Hit(D2D1_RECT_F rect, D2D1_POINT_2F point) noexcept {
+    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+}
+float ClampUnit(double value) noexcept {
+    return static_cast<float>(std::clamp(value, static_cast<double>(PaintSpec::Zero),
+                                        static_cast<double>(PaintSpec::Unit)));
+}
+// Cubic evaluation coefficients are mathematical, not visual design tokens.
+float Ease(float x) noexcept {
+    const auto& curve = Motion::FadeBezier;
+    auto cubic = [](float t, float a, float b) {
+        const float u = PaintSpec::Unit - t;
+        return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t;
+    };
+    float lo = PaintSpec::Zero, hi = PaintSpec::Unit;
+    for (int iteration = 0; iteration < 24; ++iteration) {
+        const float mid = (lo + hi) * WindowSpec::Half;
+        if (cubic(mid, curve[0], curve[2]) < x) { lo = mid; } else { hi = mid; }
+    }
+    return cubic((lo + hi) * WindowSpec::Half, curve[1], curve[3]);
+}
+}
+
+double App::Now() const noexcept {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch_).count();
+}
+
 int App::Run(HINSTANCE instance) {
     geometry_.Initialize();
     painter_.Initialize();
+    scene_.mediaActive = demo_.MediaActive();
+    BOOL animations = TRUE;
+    CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
+    scene_.reducedMotion = animations == FALSE;
     window_.Create(instance, geometry_, *this);
+    if (options_.demo) { window_.EnableDemoKeyboard(); }
     window_.Show();
-    MSG message{};
-    for (;;) {
-        const BOOL result = GetMessageW(&message, nullptr, 0, 0);
-        if (result == -1) { CheckWin32(FALSE, "GetMessageW"); }
-        if (result == 0) { break; }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+    lastTick_ = Now();
+    bool quit = false;
+    while (!quit && !failed_) {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.message == WM_QUIT) { quit = true; break; }
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        if (quit || failed_) { break; }
+        const double now = Now();
+        Tick(now);
+        const bool needsFrame = !deviceUnavailable_ && (dirty_ || scene_.animating);
+        const HANDLE frame = renderer_.FrameReady();
+        if (needsFrame && (!frame || WaitForSingleObject(frame, 0) == WAIT_OBJECT_0)) {
+            Render(now);
+            continue;
+        }
+        const DWORD count = needsFrame && frame ? 1u : 0u;
+        const DWORD result = MsgWaitForMultipleObjectsEx(count, count ? &frame : nullptr,
+            DeadlineWait(now), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (result == WAIT_FAILED) { CheckWin32(FALSE, "Wait for frame or input"); }
+        if (count && result == WAIT_OBJECT_0) {
+            const double ready = Now();
+            Tick(ready);
+            Render(ready);
+        }
     }
     char count[96]{};
     std::snprintf(count, sizeof(count), "Session Present count: %llu",
@@ -85,32 +141,161 @@ int App::Run(HINSTANCE instance) {
     return failed_ ? 1 : 0;
 }
 
-void App::OnDraw() {
+DWORD App::DeadlineWait(double now) const noexcept {
+    std::optional<double> deadline = state_.NextDeadline();
+    if (const auto hover = hover_.NextDeadline(); hover && (!deadline || *hover < *deadline)) { deadline = hover; }
+    if (!deadline) { return INFINITE; }
+    const double milliseconds = std::ceil((std::max)(0.0, *deadline - now) * Motion::MillisecondsPerSecond);
+    return static_cast<DWORD>((std::min)(milliseconds, static_cast<double>(INFINITE - 1)));
+}
+
+void App::Transition(double now) {
+    const auto next = state_.Current();
+    if (scene_.incoming.state == next && (next != IslandState::Hud || scene_.incoming.hud == state_.Hud())) { return; }
+    const auto previous = scene_.incoming.state;
+    scene_.outgoing = scene_.incoming;
+    outgoingStartOpacity_ = scene_.outgoing.opacity;
+    scene_.hasOutgoing = true;
+    scene_.incoming.state = next;
+    scene_.incoming.hud = state_.Hud();
+    scene_.incoming.opacity = PaintSpec::Zero;
+    scene_.incoming.blur = scene_.reducedMotion ? PaintSpec::Zero : Motion::ContentBlur;
+    fadeStart_ = now;
+    lastTick_ = now; // Time spent idle before this event must not advance the new target.
+    fading_ = true;
+    if (previous != next) { springs_.SetTarget(GeometryFor(next), SpringFor(previous, next)); }
+    if (scene_.reducedMotion) { springs_.Snap(); }
+    dirty_ = true;
+}
+
+void App::Tick(double now) {
+    const double elapsed = (std::max)(0.0, now - lastTick_);
+    state_.Tick(now);
+    if (const auto expanded = hover_.Tick(now)) { state_.SetExpanded(*expanded); }
+    Transition(now);
+    const bool wasMoving = !springs_.Settled() || !IsSettled(tabSpring_) || fading_;
+    if (scene_.reducedMotion) { springs_.Snap(); }
+    else { springs_.Advance((std::min)(elapsed, (std::max)(0.0, now - lastTick_))); }
+    lastTick_ = now;
+    if (!IsSettled(tabSpring_)) {
+        if (!scene_.reducedMotion) {
+            tabAccumulator_ += (std::min)(elapsed, Motion::MaxFrameDelta);
+            while (tabAccumulator_ >= Motion::FixedStep) {
+                StepSpring(tabSpring_, Spring::ToExpanded, static_cast<float>(Motion::FixedStep));
+                tabAccumulator_ -= Motion::FixedStep;
+            }
+        }
+        if (scene_.reducedMotion || IsSettled(tabSpring_)) {
+            tabSpring_.x = tabSpring_.target; tabSpring_.v = PaintSpec::Zero; tabAccumulator_ = 0.0;
+        }
+    }
+    if (fading_) {
+        const double ageMs = (now - fadeStart_) * Motion::MillisecondsPerSecond;
+        const double delay = scene_.reducedMotion ? PaintSpec::Zero : Motion::FadeDelayMs;
+        const double duration = scene_.reducedMotion ? Motion::ReducedFadeMs : Motion::FadeInMs;
+        const double outDuration = scene_.reducedMotion ? Motion::ReducedFadeMs : Motion::FadeOutMs;
+        const float progress = ClampUnit((ageMs - delay) / duration);
+        scene_.incoming.opacity = progress == PaintSpec::Unit ? progress : Ease(progress);
+        scene_.incoming.blur = scene_.reducedMotion ? PaintSpec::Zero : Motion::ContentBlur * (PaintSpec::Unit - scene_.incoming.opacity);
+        scene_.outgoing.opacity = outgoingStartOpacity_ * (PaintSpec::Unit - ClampUnit(ageMs / outDuration));
+        scene_.hasOutgoing = scene_.outgoing.opacity > PaintSpec::Zero;
+        fading_ = ageMs < delay + duration || scene_.hasOutgoing;
+    }
+    scene_.geometry = springs_.Value();
+    geometry_.Update(scene_.geometry);
+    window_.UpdatePointer();
+    scene_.tabPosition = tabSpring_.x;
+    scene_.time = now;
+    const bool wave = scene_.mediaActive && !scene_.reducedMotion &&
+        (scene_.incoming.state == IslandState::Compact ||
+         (scene_.hasOutgoing && scene_.outgoing.state == IslandState::Compact));
+    scene_.animating = !springs_.Settled() || !IsSettled(tabSpring_) || fading_ || wave;
+    if (wasMoving) { dirty_ = true; } // includes the final settled IDLE frame
+}
+
+void App::Render(double now) {
     if (failed_ || window_.PixelWidth() == 0 || window_.PixelHeight() == 0) { return; }
+    scene_.bounds = options_.debugBounds;
+    scene_.fpsVisible = options_.showDebugFps;
+    scene_.fps = now > lastPresent_ && lastPresent_ > 0.0 ? static_cast<float>(1.0 / (now - lastPresent_)) : PaintSpec::Zero;
+    dirty_ = false;
     if (!renderer_.Render(window_.Handle(), window_.PixelWidth(), window_.PixelHeight(),
-                          window_.Dpi(), geometry_, painter_, options_.debugBounds,
-                          options_.showDebugFps, demo_.MediaActive())) {
-        // Never busy-spin indefinitely on an unavailable GPU. After bounded
-        // retries, retain the process and retry on a new invalidation (debug
-        // toggle, display/resume, or WM_PAINT), not on every raw mouse packet.
+                          window_.Dpi(), geometry_, painter_, scene_)) {
+        deviceUnavailable_ = true;
         constexpr unsigned kMaxRecoveryAttempts = 3;
         if (++recoveryAttempts_ <= kMaxRecoveryAttempts) { window_.ScheduleRecovery(); }
-        else { Log("GPU unavailable; automatic retries suspended until next redraw event"); }
+        else { Log("GPU unavailable; retries suspended until a redraw event"); }
         return;
     }
+    lastPresent_ = now;
+    deviceUnavailable_ = false;
     recoveryAttempts_ = 0;
     window_.CancelRecovery();
     if (options_.verifyDeviceRecovery && !recoveryVerified_) {
         recoveryVerified_ = true;
         renderer_.Reset();
-        window_.Invalidate();
-        Log("Test: resource teardown requested after first Present (not a hardware device-loss injection)");
+        dirty_ = true;
+        Log("Test: resource teardown requested after first Present (not hardware device-loss injection)");
     }
-    // M0 is fully settled: its final frame already says IDLE. No render timer.
 }
-void App::OnBoundsToggle() { options_.debugBounds = !options_.debugBounds; window_.Invalidate(); }
-void App::OnFpsToggle() { options_.showDebugFps = !options_.showDebugFps; window_.Invalidate(); }
-void App::OnResume() { renderer_.Reset(); recoveryAttempts_ = 0; window_.Invalidate(); }
+
+void App::OnDraw() { dirty_ = true; deviceUnavailable_ = false; }
+void App::OnBoundsToggle() { options_.debugBounds = !options_.debugBounds; OnDraw(); }
+void App::OnFpsToggle() { options_.showDebugFps = !options_.showDebugFps; OnDraw(); }
+void App::OnResume() {
+    renderer_.Reset(); recoveryAttempts_ = 0;
+    BOOL animations = TRUE;
+    CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
+    scene_.reducedMotion = animations == FALSE;
+    OnDraw();
+}
+void App::OnPointer(bool inside) {
+    pointerInside_ = inside;
+    hover_.Pointer(inside, Now());
+}
+void App::OnClick(D2D1_POINT_2F point) {
+    const double now = Now();
+    if (state_.Current() == IslandState::Dormant || state_.Current() == IslandState::Compact) {
+        state_.SetExpanded(true); Transition(now); return;
+    }
+    if (state_.Current() != IslandState::Expanded) { return; }
+    const D2D1_RECT_F tabs[] = {ExpandedNowPlaying::Tab0, ExpandedNowPlaying::Tab1, ExpandedNowPlaying::Tab2};
+    for (unsigned tab = 0; tab < std::size(tabs); ++tab) {
+        if (!Hit(tabs[tab], point) || scene_.incoming.tab == tab) { continue; }
+        scene_.outgoing = scene_.incoming;
+        outgoingStartOpacity_ = scene_.outgoing.opacity;
+        scene_.hasOutgoing = true;
+        scene_.incoming.tab = tab;
+        scene_.incoming.opacity = PaintSpec::Zero;
+        scene_.incoming.blur = scene_.reducedMotion ? PaintSpec::Zero : Motion::ContentBlur;
+        fadeStart_ = now; lastTick_ = now; fading_ = true;
+        tabSpring_.target = ExpandedNowPlaying::TabSel.rect.left + ExpandedNowPlaying::TabStride * static_cast<float>(tab);
+        dirty_ = true;
+        break;
+    }
+}
+void App::OnDemoKey(UINT key) {
+    if (!options_.demo || !pointerInside_) { return; }
+    const double now = Now();
+    switch (key) {
+    case '1': case '2':
+        state_.DismissHud();
+        state_.SetBase(key == '1' ? IslandState::Dormant : IslandState::Compact, now);
+        scene_.mediaActive = key == '2' || demo_.MediaActive();
+        // Consume pending hover entry so an explicit demo choice is observable.
+        hover_ = HoverTracker{}; hover_.Pointer(true, now);
+        (void)hover_.Tick(now + Motion::HoverEnterMs / Motion::MillisecondsPerSecond);
+        break;
+    case '3': state_.DismissHud(); state_.SetExpanded(true); break;
+    case '4': state_.PinHud(HudKind::Volume); break;
+    case 'V': state_.TriggerHud(HudKind::Volume, now); break;
+    case 'B': state_.TriggerHud(HudKind::Brightness, now); break;
+    case 'P': state_.TriggerHud(HudKind::Pomodoro, now); break;
+    default: return;
+    }
+    Transition(now);
+    OnDraw();
+}
 void App::OnFailure(const char* message) noexcept {
     Log(message);
     failed_ = true;

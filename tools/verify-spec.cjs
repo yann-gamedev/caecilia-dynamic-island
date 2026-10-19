@@ -51,7 +51,7 @@ function values(text, type) {
 // They remain covered by the exact Appendix A equality check above.
 const originalDeclarations = header
   .replace(/^\s*constexpr D2D1_RECT_F (Body|LeftEar|RightEar|FpsRect) = .*;.*$/gm, '')
-  .replace(/^\s*constexpr D2D1_COLOR_F (Transparent|ActiveColor|IdleColor) = .*;.*$/gm, '');
+  .replace(/^\s*constexpr D2D1_COLOR_F (Transparent|ActiveColor|IdleColor|ArtworkPlaceholder) = .*;.*$/gm, '');
 for (const type of ['IslandGeom', 'D2D1_ROUNDED_RECT', 'D2D1_RECT_F',
   'D2D1_COLOR_F', 'SpringParams']) {
   assert.deepEqual(values(originalDeclarations, type), values(exported, type),
@@ -65,4 +65,4 @@ assert.equal(geometry(header), geometry(exported),
   'HTML geometry builder differs from Appendix A');
 console.log('PASS: header matches DESIGN Appendix A verbatim.');
 console.log('PASS: HTML export matches geometry, layout, colors, and spring values.');
-console.log('PASS: approved M0 extensions are synchronized with DESIGN Appendix A.');
+console.log('PASS: approved M0/M1 extensions are synchronized with DESIGN Appendix A.');

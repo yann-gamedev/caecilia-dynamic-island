@@ -67,5 +67,11 @@ Run build commands in README, then verify:
   display/resume event, or debug toggle can initiate recovery again.
 - No measurements are invented; see `docs/perf.md`.
 
-M0 source is ready for local build/testing, but acceptance is pending. Stop here;
-do not start M1 without user confirmation.
+## User acceptance — 2026-10-19
+
+The user confirmed all three requested desktop checks passed: visual placement/
+transparency, debug toggles, and cross-process click-through/no focus stealing.
+M0 is accepted for proceeding to M1, explicitly authorized by the user.
+This does not assert separate 100%/150% measurements, MSVC verification, driver
+failure injection, or performance captures; the detailed unmeasured items above
+remain unchecked. Implementation notes in this document describe the M0 snapshot.

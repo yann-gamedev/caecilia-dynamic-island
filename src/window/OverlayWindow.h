@@ -10,6 +10,9 @@ struct WindowEvents {
     virtual void OnBoundsToggle() = 0;
     virtual void OnFpsToggle() = 0;
     virtual void OnResume() = 0;
+    virtual void OnPointer(bool inside) = 0;
+    virtual void OnClick(D2D1_POINT_2F point) = 0;
+    virtual void OnDemoKey(UINT key) = 0;
     virtual void OnFailure(const char* message) noexcept = 0;
 };
 
@@ -18,6 +21,7 @@ public:
     ~OverlayWindow();
     void Create(HINSTANCE instance, IslandGeometry& geometry, WindowEvents& events);
     void Show();
+    void EnableDemoKeyboard();
     void Reposition();
     void UpdatePointer();
     void Invalidate();
@@ -43,6 +47,9 @@ private:
     bool repositionPending_{};
     bool transparent_{true};
     bool rawInput_{};
+    bool keyboardInput_{};
+    bool trackingLeave_{};
+    bool keyDown_[256]{};
     bool boundsHotkey_{};
     bool fpsHotkey_{};
     bool recoveryTimer_{};

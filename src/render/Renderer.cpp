@@ -16,6 +16,10 @@ void Renderer::Reset() noexcept {
     visual_.Reset();
     compositionTarget_.Reset();
     composition_.Reset();
+    if (frameReady_) {
+        if (!CloseHandle(frameReady_)) { Log("Close frame latency handle failed"); }
+        frameReady_ = nullptr;
+    }
     swap_.Reset();
     if (immediate_) { immediate_->ClearState(); immediate_->Flush(); }
     immediate_.Reset();
@@ -68,8 +72,14 @@ void Renderer::Create(HWND window, UINT width, UINT height, float dpi, IslandGeo
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+    desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     Check(factory->CreateSwapChainForComposition(d3d_.Get(), &desc, nullptr,
           swap_.GetAddressOf()), "CreateSwapChainForComposition");
+    ComPtr<IDXGISwapChain2> paced;
+    Check(swap_.As(&paced), "Query IDXGISwapChain2");
+    Check(paced->SetMaximumFrameLatency(1), "SetMaximumFrameLatency");
+    frameReady_ = paced->GetFrameLatencyWaitableObject();
+    CheckWin32(frameReady_ != nullptr, "GetFrameLatencyWaitableObject");
     Check(DCompositionCreateDevice(dxgi.Get(), IID_PPV_ARGS(composition_.GetAddressOf())),
           "DCompositionCreateDevice");
     Check(composition_->CreateTargetForHwnd(window, TRUE, compositionTarget_.GetAddressOf()),
@@ -88,19 +98,20 @@ void Renderer::Create(HWND window, UINT width, UINT height, float dpi, IslandGeo
 
 bool Renderer::Render(HWND window, UINT width, UINT height, float dpi,
                       IslandGeometry& geometry, Painter& painter,
-                      bool bounds, bool fps, bool mediaActive) {
+                      const Scene& scene) {
     try {
         if (!swap_) { Create(window, width, height, dpi, geometry); }
         if (width != width_ || height != height_) {
             context_->SetTarget(nullptr);
             target_.Reset();
-            Check(swap_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0), "ResizeBuffers");
+            Check(swap_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN,
+                  DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT), "ResizeBuffers");
             BindTarget(dpi);
             width_ = width;
             height_ = height;
         }
         context_->SetDpi(dpi, dpi);
-        painter.Draw(context_.Get(), geometry, bounds, fps, mediaActive);
+        painter.Draw(context_.Get(), geometry, scene);
         Check(swap_->Present(1, 0), "Present");
         ++presents_;
         recovering_ = false;

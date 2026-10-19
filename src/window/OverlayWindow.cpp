@@ -55,6 +55,12 @@ void OverlayWindow::Create(HINSTANCE instance, IslandGeometry& geometry, WindowE
     UpdatePointer();
 }
 
+void OverlayWindow::EnableDemoKeyboard() {
+    RAWINPUTDEVICE keyboard{0x01, 0x06, RIDEV_INPUTSINK, hwnd_};
+    CheckWin32(RegisterRawInputDevices(&keyboard, 1, sizeof(keyboard)), "Register demo keyboard");
+    keyboardInput_ = true;
+}
+
 void OverlayWindow::Show() {
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     Invalidate();
@@ -95,7 +101,7 @@ D2D1_POINT_2F OverlayWindow::BodyPoint(POINT screen) const {
     CheckWin32(ScreenToClient(hwnd_, &screen), "ScreenToClient");
     using namespace NotchIsland;
     const float inverseScale = WindowSpec::DpiBase / static_cast<float>(dpi_);
-    const float offset = (WindowSpec::Width - kGeomIdle.width) * WindowSpec::Half;
+    const float offset = (WindowSpec::Width - geometry_->Value().width) * WindowSpec::Half;
     return {static_cast<float>(screen.x) * inverseScale - offset,
             static_cast<float>(screen.y) * inverseScale};
 }
@@ -115,6 +121,7 @@ void OverlayWindow::UpdatePointer() {
     const LONG_PTR previous = SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, next);
     if (previous == 0 && GetLastError() != ERROR_SUCCESS) { CheckWin32(FALSE, "SetWindowLongPtr"); }
     transparent_ = transparent;
+    events_->OnPointer(!transparent);
 }
 
 void OverlayWindow::Invalidate() {
@@ -141,6 +148,11 @@ void OverlayWindow::Close() noexcept {
             RAWINPUTDEVICE mouse{0x01, 0x02, RIDEV_REMOVE, nullptr};
             if (!RegisterRawInputDevices(&mouse, 1, sizeof(mouse))) { Log("UnregisterRawInput failed"); }
             rawInput_ = false;
+        }
+        if (keyboardInput_) {
+            RAWINPUTDEVICE keyboard{0x01, 0x06, RIDEV_REMOVE, nullptr};
+            if (!RegisterRawInputDevices(&keyboard, 1, sizeof(keyboard))) { Log("Unregister demo keyboard failed"); }
+            keyboardInput_ = false;
         }
         if (!DestroyWindow(hwnd_)) { Log("DestroyWindow failed"); }
         hwnd_ = nullptr;
@@ -178,11 +190,45 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         return geometry_->Contains(BodyPoint(point)) ? HTCLIENT : HTTRANSPARENT;
     }
-    case WM_INPUT:
-        UpdatePointer();
-        // Required raw-input cleanup for RIM_INPUT foreground messages.
+    case WM_INPUT: {
+        // Only inspect the fixed mouse/keyboard packet. No key text is stored,
+        // no logging, no suppression: keys still go to the foreground app.
+        RAWINPUT packet{};
+        UINT size = sizeof(packet);
+        const UINT read = GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam), RID_INPUT,
+                                         &packet, &size, sizeof(RAWINPUTHEADER));
+        if (read == static_cast<UINT>(-1)) { CheckWin32(FALSE, "GetRawInputData"); }
+        if (packet.header.dwType == RIM_TYPEMOUSE) { UpdatePointer(); }
+        if (keyboardInput_ && packet.header.dwType == RIM_TYPEKEYBOARD) {
+            const UINT key = packet.data.keyboard.VKey;
+            if (key < 256) {
+                const bool down = (packet.data.keyboard.Flags & RI_KEY_BREAK) == 0;
+                const bool first = down && !keyDown_[key];
+                keyDown_[key] = down;
+                if (first && (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0 &&
+                    (GetAsyncKeyState(VK_MENU) & 0x8000) == 0 &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0) { events_->OnDemoKey(key); }
+            }
+        }
         return DefWindowProcW(hwnd_, message, wparam, lparam);
-    case WM_MOUSEMOVE: UpdatePointer(); return 0;
+    }
+    case WM_MOUSEMOVE:
+        if (!trackingLeave_) {
+            TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd_, 0};
+            CheckWin32(TrackMouseEvent(&tracking), "TrackMouseEvent");
+            trackingLeave_ = true;
+        }
+        UpdatePointer(); return 0;
+    case WM_MOUSELEAVE:
+        trackingLeave_ = false;
+        UpdatePointer(); return 0;
+    case WM_LBUTTONUP: {
+        POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        CheckWin32(ClientToScreen(hwnd_, &screen), "ClientToScreen click");
+        const auto point = BodyPoint(screen);
+        if (geometry_->Contains(point)) { events_->OnClick(point); }
+        return 0;
+    }
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         const HDC dc = BeginPaint(hwnd_, &paint);
@@ -215,6 +261,8 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_TIMER:
         if (wparam == kRecoveryTimer) { CancelRecovery(); Invalidate(); }
         return 0;
+    case WM_SETTINGCHANGE:
+        events_->OnResume(); return 0;
     case WM_POWERBROADCAST:
         if (wparam == PBT_APMRESUMEAUTOMATIC || wparam == PBT_APMRESUMESUSPEND) {
             Reposition(); events_->OnResume();

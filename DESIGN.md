@@ -123,10 +123,10 @@ Screen X @1920 = local X + 840.
 | Right ear (concave) | 240 | 0 | 9 | 9 | 9 | `{240, 0, 249, 9}` | Core | Arc center (W + e, e) |
 | Album art | 10 | 6 | 22 | 22 | 6 | `{10, 6, 32, 28}` | Label primary | Bitmap brush clipped to rounded rect |
 | Waveform group | 209 | 9 | 21 | 16 | — | `{209, 9, 230, 25}` | Sky | Envelope of the 4 bars |
-| Wave bar 1 | 209 | 9 | 3 | 16 | 1.5 | `{209, 9, 212, 25}` | Sky | Height 4–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 2 | 215 | 9 | 3 | 16 | 1.5 | `{215, 9, 218, 25}` | Sky | Height 4–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 3 | 221 | 9 | 3 | 16 | 1.5 | `{221, 9, 224, 25}` | Sky | Height 4–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 4 | 227 | 9 | 3 | 16 | 1.5 | `{227, 9, 230, 25}` | Sky | Height 4–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 1 | 209 | 9 | 3 | 16 | 1.5 | `{209, 9, 212, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 2 | 215 | 9 | 3 | 16 | 1.5 | `{215, 9, 218, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 3 | 221 | 9 | 3 | 16 | 1.5 | `{221, 9, 224, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 4 | 227 | 9 | 3 | 16 | 1.5 | `{227, 9, 230, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
 
 ### Expanded · Now Playing — `namespace ExpandedNowPlaying`
 
@@ -245,7 +245,7 @@ Screen X @1920 = local X + 860.
 | Active tab pill | `x = 18 + 84 × tabIndex`. Animasi geser memakai pegas `ToExpanded`. |
 | Scrub fill | `width = 176 × progress` |
 | Scrub knob | pusat `(92 + 176 × progress, 90)`, ukuran 10 × 10 |
-| Wave bar i | `x = 209 + 6i`, `w = 3`, `h ∈ [4, 16]`, pusat vertikal `y = 17` |
+| Wave bar i | `x = 209 + 6i`, `w = 3`, `h ∈ [4.48, 16]`, pusat vertikal `y = 17` |
 | Level fill (HUD) | `width = 112 × level` |
 | Telemetry bar | `width = 368 × value` (tab Telemetry), `88 × value` (GPU pill) |
 | Ring | stroke 3.5 (telemetri) atau 2.5 (Pomodoro), radius `(w − stroke) / 2`, mulai jam 12, searah jarum jam, cap round |
@@ -383,6 +383,34 @@ Area hit-test = geometri island saat ini (`ID2D1Geometry::FillContainsPoint`), b
 
 ---
 
+## 12. Keputusan final M1 — 2026-10-19
+
+- **M0 diterima pengguna pada 2026-10-19.** Ini mencatat penerimaan pengguna, bukan klaim bahwa seluruh target performa atau pengujian MSVC sudah diukur.
+- `Motion` menamai angka Bagian 8: fixed step `1/240` detik, maksimum delta frame `1/20` detik, konversi `1000` ms/detik, hover masuk/keluar `120/250` ms, HUD `1800` ms, fade-in/delay/fade-out `240/70/120` ms, blur konten `3` DIP, dan fade cubic `(0.2, 0.8, 0.2, 1)`. Fade-out tetap linear. Parameter pegas, `StepSpring`, `IsSettled`, dan `BuildIslandGeometry` tidak diubah.
+- **Keputusan waveform pengguna: minimum 4.48 DIP, bukan 4 DIP.** Tinggi penuh tetap 16 DIP dan minimum scale tetap `0.28`; `16 × 0.28 = 4.48`. Semua catatan layout native mengikuti 4.48–16 DIP. HTML asli dipertahankan sebagai referensi historis; catatan tinggi lamanya bukan keputusan native terbaru.
+- Siklus waveform `820/640/1040/760` ms berasal dari `IslandContent` HTML; fase `-120/-380/-60/-520` ms adalah nilai `animationDelay` HTML, bertipe signed. Fase waktu efektif adalah waktu berjalan dikurangi delay negatif, modulo periode. Keyframe minimum di awal/akhir siklus dan maksimum di tengah; masing-masing setengah siklus memakai `Motion::WaveBezier`.
+- `Motion::WaveBezier = (0.42, 0, 0.58, 1)` adalah terjemahan normatif keyword CSS `ease-in-out`, **bukan kurva desain baru**. Rujukan: *CSS Easing Functions Level 1*, bagian cubic Bézier easing functions (`https://www.w3.org/TR/css-easing-1/#cubic-bezier-easing-functions`). Referensi dicatat tanpa akses jaringan. Saat pause, aturan native Bagian 8 tetap minimum scale `0.28`.
+- `ExpandedNowPlaying::TabStride` diturunkan dari `Tab1.left − Tab0.left` (84 DIP). `PaintSpec::RingStroke/PomodoroStroke` = `3.5/2.5` DIP, `DropStroke/DropDash/DropGap` = `1/4/3` DIP, semuanya dari Bagian 5 dan HTML. Dash Direct2D dinyatakan dalam kelipatan stroke; pada stroke 1 DIP nilainya sama. Offset icon/nama tile `(12,12)/(12,40)` dan inset kanan nama 10 DIP berasal dari HTML tile.
+- `Glyph` di Lampiran A menerjemahkan persis SVG `G` HTML: prev/next adalah dua polygon segitiga, play satu polygon, pause dua rounded rect, speaker polygon + dua small arc clockwise, sun lingkaran + ray yang dirotasi, file outline tertutup + fold terbuka. Koordinat dan stroke hanya disimpan di spec (dan salinan Lampiran A), bukan literal dalam renderer. View box prev/next `14 × 12`, play/pause `14 × 14`, speaker/sun/file `20 × 20`; media dipusatkan di button. Keterangan "Glyph 12 DIP" tetap merujuk tinggi skip, tidak mengecilkan SVG menjadi kotak 12 × 12. Tidak ada icon font atau dekorasi baru.
+- `Demo` menyimpan tiga judul/artis/durasi fiktif HTML, track awal 0, elapsed 71 detik, playing true, volume/brightness `64/72`, telemetri CPU/RAM/GPU/NET `34/58/41/22`, RAM total 32 GB (0.32 GB per persen), NET 0.42 MB/s per persen, Pomodoro `18:42` dari total `25:00`, label dan nama file HTML. Ini sample deterministik, bukan data sistem. Artwork boleh placeholder `Color::Label` sesuai PRD R1; gradien prosedural dan warna hue HTML tidak diimpor. Jam HTML berasal dari waktu lokal, bukan angka contoh tetap yang boleh dikarang.
+- Header dan Lampiran A harus identik. Perubahan verifier untuk pengecualian M1 dilakukan terpisah; HTML asli tidak diubah.
+
+- Keputusan pengguna lanjutan: reduced motion memakai fade masuk/keluar masing-masing 100 ms tanpa delay/blur; masuk tetap cubic `(0.2,0.8,0.2,1)`, keluar linear.
+- Demo keyboard memakai raw input tanpa mengambil fokus atau menahan tombol aplikasi foreground, dan hanya berlaku selama kursor berada di geometri island. `1/2/3` memilih Dormant/Compact/Expanded dan membatalkan HUD, `4` mem-pin Volume HUD sampai pilihan state berikutnya; `V/B/P` mengganti HUD menjadi transient 1800 ms dan me-reset deadline. Pemilihan state eksplisit tidak langsung ditimpa hover entry yang masih tertunda.
+
+### 12.1 Perbedaan referensi yang belum diselesaikan oleh tambahan ini
+
+Tambahan M1 ini tidak diam-diam mengganti aturan native yang sudah ada dengan implementasi browser:
+
+- HTML menggeser tab dengan CSS 380 ms cubic `(0.3,1.25,0.4,1)`, sedangkan Bagian 5.1 menentukan pegas `ToExpanded`.
+- HTML membekukan waveform pada fase saat pause; Bagian 8 menentukan berhenti di minimum scale. HTML juga langsung hover tanpa delay, sedangkan native menentukan 120/250 ms.
+- HTML memakai polling telemetri 1400 ms, animasi ring 600 ms dan bar 500 ms cubic `(0.2,0.8,0.2,1)`; Bagian 8 menentukan update 1000 ms dan perubahan 500 ms ease-out. Sample awal diimpor, bukan polling acak HTML.
+- HTML menghapus konten lama langsung dan menonaktifkan fade sepenuhnya pada reduced motion; native menentukan fade-out linear 120 ms dan reduced-motion fade 100 ms tanpa blur. Tidak ada perubahan kebijakan tersebut di sini.
+- HTML punya tambahan highlight/pill/tile inset, knob shadow, variasi glow dan drop-zone fill setengah alpha yang tidak semuanya ada dalam tabel native. Tambahan glyph/sample ini tidak menyetujui dekorasi atau token warna baru tersebut.
+- README dan dokumen status M0 masih menyatakan penerimaan pending; pembaruan status di luar dua file spec ini ditangani sesi utama. Penerimaan pengguna di atas tidak mengarang bukti ukur yang belum tersedia.
+
+---
+
 ## Lampiran A — `NotchIslandSpec.h`
 
 Header ini adalah terjemahan langsung dari tabel di atas. Taruh di `src/spec/NotchIslandSpec.h`. Jika ada perubahan desain, ubah dokumen ini dan header ini bersamaan.
@@ -442,7 +470,7 @@ namespace Idle {
 }
 namespace Compact {
   constexpr D2D1_ROUNDED_RECT Art = { { 10.0f, 6.0f, 32.0f, 28.0f }, 6.0f, 6.0f }; // Album art
-  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group
+  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group; bars are 4.48–16 DIP high, centered on y = 17.
   constexpr D2D1_ROUNDED_RECT Bar0 = { { 209.0f, 9.0f, 212.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 1
   constexpr D2D1_ROUNDED_RECT Bar1 = { { 215.0f, 9.0f, 218.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 2
   constexpr D2D1_ROUNDED_RECT Bar2 = { { 221.0f, 9.0f, 224.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 3
@@ -575,6 +603,108 @@ namespace DebugHud {
   constexpr wchar_t IdleText[] = L"IDLE";
   constexpr bool ShowDebugFpsDefault = false; // Ctrl+Shift+F; independent of Ctrl+Alt+F12 bounds.
   constexpr bool ShowBoundsDefault = false;
+}
+
+// M1 additions: DESIGN sections 5, 8 and 12; original HTML remains unchanged.
+namespace Motion {
+  constexpr double FixedStep = 1.0 / 240.0;
+  constexpr double MaxFrameDelta = 1.0 / 20.0;
+  constexpr double MillisecondsPerSecond = 1000.0;
+  constexpr unsigned HoverEnterMs = 120;
+  constexpr unsigned HoverLeaveMs = 250;
+  constexpr unsigned HudMs = 1800;
+  constexpr unsigned FadeInMs = 240;
+  constexpr unsigned FadeDelayMs = 70;
+  constexpr unsigned FadeOutMs = 120; // Linear.
+  constexpr unsigned ReducedFadeMs = 100; // Both fades, no delay/blur; fade-in cubic, fade-out linear.
+  constexpr float ContentBlur = 3.0f;
+  constexpr std::array<float, 4> FadeBezier = { 0.2f, 0.8f, 0.2f, 1.0f };
+  constexpr std::array<unsigned, 4> WavePeriodsMs = { 820, 640, 1040, 760 };
+  constexpr std::array<int, 4> WavePhaseMs = { -120, -380, -60, -520 }; // CSS animation-delay.
+  constexpr float WaveMinimumScale = 0.28f; // 16 DIP * 0.28 = 4.48 DIP, user-approved.
+  // CSS Easing Functions Level 1: ease-in-out is this cubic, not a new design curve.
+  constexpr std::array<float, 4> WaveBezier = { 0.42f, 0.0f, 0.58f, 1.0f };
+  // Each half-cycle uses WaveBezier; negative delay starts partway into the cycle.
+}
+namespace PaintSpec {
+  constexpr float RingStroke = 3.5f;
+  constexpr float PomodoroStroke = 2.5f;
+  constexpr float DropStroke = 1.0f;
+  constexpr float DropDash = 4.0f;
+  constexpr float DropGap = 3.0f;
+}
+namespace ExpandedNowPlaying {
+  constexpr float TabStride = Tab1.left - Tab0.left;
+}
+namespace ExpandedDropTray {
+  constexpr D2D1_POINT_2F TileIconOffset = { 12.0f, 12.0f };
+  constexpr D2D1_POINT_2F TileNameOffset = { 12.0f, 40.0f };
+  constexpr float TileNameRightInset = 10.0f;
+}
+
+namespace Glyph {
+  // Exact HTML G SVG coordinates, local to the view box. Center media view boxes in buttons.
+  constexpr D2D1_SIZE_F SkipSize = { 14.0f, 12.0f };
+  constexpr D2D1_SIZE_F PlaySize = { 14.0f, 14.0f };
+  constexpr D2D1_SIZE_F HudSize = { 20.0f, 20.0f };
+  constexpr D2D1_SIZE_F FileSize = HudSize;
+  // Filled closed polygons; separate figures for the two skip triangles.
+  constexpr std::array<D2D1_POINT_2F, 3> PrevLeft = {{ { 7.0f, 1.0f }, { 1.0f, 6.0f }, { 7.0f, 11.0f } }};
+  constexpr std::array<D2D1_POINT_2F, 3> PrevRight = {{ { 13.0f, 1.0f }, { 7.0f, 6.0f }, { 13.0f, 11.0f } }};
+  constexpr std::array<D2D1_POINT_2F, 3> NextLeft = {{ { 1.0f, 1.0f }, { 7.0f, 6.0f }, { 1.0f, 11.0f } }};
+  constexpr std::array<D2D1_POINT_2F, 3> NextRight = {{ { 7.0f, 1.0f }, { 13.0f, 6.0f }, { 7.0f, 11.0f } }};
+  constexpr std::array<D2D1_POINT_2F, 3> Play = {{ { 3.0f, 1.5f }, { 3.0f, 12.5f }, { 12.5f, 7.0f } }};
+  constexpr std::array<D2D1_ROUNDED_RECT, 2> Pause = {{
+    { { 2.5f, 1.5f, 5.7f, 12.5f }, 1.0f, 1.0f },
+    { { 8.3f, 1.5f, 11.5f, 12.5f }, 1.0f, 1.0f }
+  }};
+  constexpr std::array<D2D1_POINT_2F, 6> Speaker = {{
+    { 3.0f, 7.5f }, { 6.0f, 7.5f }, { 10.5f, 3.5f },
+    { 10.5f, 16.5f }, { 6.0f, 12.5f }, { 3.0f, 12.5f }
+  }};
+  struct Arc { D2D1_POINT_2F start; D2D1_ARC_SEGMENT segment; };
+  constexpr std::array<Arc, 2> SpeakerArcs = {{
+    { { 13.5f, 6.5f }, { { 13.5f, 13.5f }, { 5.0f, 5.0f }, 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL } },
+    { { 15.8f, 4.2f }, { { 15.8f, 15.8f }, { 8.2f, 8.2f }, 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL } }
+  }};
+  constexpr float SpeakerStroke = 1.5f; // Open arcs, round caps, no fill.
+  constexpr D2D1_ELLIPSE Sun = { { 10.0f, 10.0f }, 3.6f, 3.6f }; // Filled.
+  constexpr std::array<D2D1_POINT_2F, 2> SunRay = {{ { 10.0f, 2.4f }, { 10.0f, 4.2f } }};
+  constexpr std::array<float, 8> SunRayAngles = { 0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f };
+  constexpr float SunStroke = 1.6f; // Rotate ray about Sun.point, degrees; round caps.
+  constexpr std::array<D2D1_POINT_2F, 5> FileOutline = {{
+    { 5.0f, 2.5f }, { 11.5f, 2.5f }, { 15.5f, 6.5f }, { 15.5f, 17.5f }, { 5.0f, 17.5f }
+  }}; // Closed, stroked, no fill.
+  constexpr std::array<D2D1_POINT_2F, 3> FileFold = {{ { 11.5f, 2.5f }, { 11.5f, 6.5f }, { 15.5f, 6.5f } }};
+  constexpr float FileStroke = 1.4f; // Open fold; both paths have round joins and flat caps.
+}
+
+namespace Demo {
+  // Fictional HTML TRACKS and initial App state, not live system measurements.
+  struct Track { const wchar_t* title; const wchar_t* artist; unsigned durationSeconds; };
+  constexpr std::array<Track, 3> Tracks = {{
+    { L"Glass Harbor", L"Mira Okonkwo", 214 },
+    { L"Low Orbit Lullaby", L"The Quiet Engines", 188 },
+    { L"Monsoon Static", L"Aru Prasetyo", 242 }
+  }};
+  constexpr unsigned InitialTrack = 0;
+  constexpr unsigned ElapsedSeconds = 71;
+  constexpr bool Playing = true;
+  constexpr unsigned SecondsPerMinute = 60;
+  constexpr float Percent = 100.0f;
+  constexpr float Volume = 64.0f;
+  constexpr float Brightness = 72.0f;
+  constexpr std::array<float, 4> Telemetry = { 34.0f, 58.0f, 41.0f, 22.0f }; // CPU, RAM, GPU, NET percentages.
+  constexpr float RamTotalGb = 32.0f;
+  constexpr float RamGbPerPercent = 0.32f;
+  constexpr float NetMbPerSecondPerPercent = 0.42f;
+  constexpr unsigned PomodoroLeftSeconds = 18 * SecondsPerMinute + 42;
+  constexpr unsigned PomodoroTotalSeconds = 25 * SecondsPerMinute;
+  constexpr wchar_t PomodoroLabel[] = L"Focus";
+  constexpr std::array<const wchar_t*, 3> TabLabels = { L"Now Playing", L"Telemetry", L"Drop Tray" };
+  constexpr std::array<const wchar_t*, 4> TelemetryLabels = { L"CPU", L"RAM", L"GPU", L"NET" };
+  constexpr std::array<const wchar_t*, 3> FileNames = { L"spec-sheet.pdf", L"notch@2x.png", L"build-0412.zip" };
+  constexpr D2D1_COLOR_F ArtworkPlaceholder = Color::Label; // PRD R1; no procedural HTML artwork imported.
 }
 
 struct SpringParams { float stiffness, damping, mass; };

@@ -1,107 +1,125 @@
 # Caecilia Notch Island
 
-Native C++20 Windows overlay using D3D11, DXGI, DirectComposition, Direct2D 1.1,
-and DirectWrite. No web UI or outgoing network requests.
+Native C++20 Windows overlay: D3D11, DXGI, DirectComposition, Direct2D 1.1 and
+DirectWrite. No web UI or outgoing network requests.
 
-**Current milestone: M0 implemented, awaiting MSVC and Windows visual acceptance.**
-M1–M4 have not been started. See [docs/m0-status.md](docs/m0-status.md) and
-[docs/perf.md](docs/perf.md) for validation status and unmeasured targets.
+**M0 accepted by the user; M1 implemented and awaiting visual acceptance.**
+M2–M4 have not started. See [M0](docs/m0-status.md), [M1](docs/m1-status.md),
+and [performance](docs/perf.md). MSVC verification remains pending.
 
-## Build on Windows 11 / Windows 10 build 19041+
+## Run without Visual Studio
 
-Install/provision Visual Studio 2022 with Desktop development with C++, an
-appropriate Windows SDK, and CMake 3.25+ locally. No build step downloads packages.
+The local portable build is at:
+
+```text
+artifacts\M1-portable\CaeciliaNotchIsland.exe
+```
+
+Run `Jalankan Demo.bat` in that folder, or:
+
+```powershell
+.\artifacts\M1-portable\CaeciliaNotchIsland.exe --demo --show-debug-fps
+```
+
+This is an unsigned alternative **MinGW x64** build with compiler runtime linked
+statically. Windows system DLLs remain required. No Visual Studio installation
+is needed to run it. Artifacts are ignored by Git, not published/downloadable releases.
+
+Rebuild offline using the installed MinGW toolchain:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-portable.ps1
+```
+
+## Supported MSVC build
+
+Provision VS 2022 Desktop development with C++, Windows SDK and CMake 3.25+ locally.
+No build step downloads packages.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 cmake --build build --config Release
-```
-
-Both app and C++ tests use `/W4 /WX /permissive- /utf-8 /EHsc`. CMake intentionally
-rejects non-MSVC application builds. M0 needs only Windows SDK COM headers;
-C++/WinRT media arrives in M2. An offline NuGet/vcpkg C++/WinRT include directory
-may be supplied with `-DCAECILIA_CPPWINRT_INCLUDE_DIR=...` (contains `winrt/base.h`).
-
-## Run M0
-
-```powershell
 .\build\Release\CaeciliaNotchIsland.exe --demo --debug-bounds --show-debug-fps
 ```
 
-- `--demo`: deterministic static Dormant; no real media or telemetry needed.
-- `--demo-media-active` with `--demo`: use the approved active Dormant dot opacity.
-- `--debug-bounds`: start with body/ear/lens/status bounding rectangles visible.
-- `--show-debug-fps`: start with `IDLE` visible in the specified debug rect.
-- `--config <path>`: read an explicitly selected local config file.
-- `--verify-device-recovery`: release all GPU/composition resources after the first
-  successful frame and rebuild on the next event. This tests resource lifecycle,
-  **not** a genuine injected GPU driver/device failure.
+CMake keeps MSVC as the supported toolchain; app and tests use `/W4 /WX`.
+M0/M1 use Windows SDK COM interfaces. C++/WinRT media starts in M2; an offline
+include directory can be supplied with `-DCAECILIA_CPPWINRT_INCLUDE_DIR=...`.
 
-Configuration format (UTF-8 / ASCII):
+## M1 demo controls
 
-```ini
-# caecilia.conf
-showDebugFps=false
-```
+**Place the cursor inside the island before pressing demo keys.** Raw input does
+not capture focus or suppress typing: keys still reach the foreground application.
+No keys are logged, saved or transmitted. Demo input is only registered with `--demo`.
 
-Command-line flags override config. Unknown keys/arguments fail with a debugger
-log and exit code 1. No implicit file creation or config persistence.
+| Input | Action |
+|---|---|
+| `1` | Dormant, cancel HUD |
+| `2` | Compact with active waveform, cancel HUD |
+| `3` | Expanded, cancel HUD |
+| `4` | Pin Volume HUD until another state selection |
+| `V` / `B` / `P` | Volume / Brightness / Pomodoro HUD for 1800 ms; refresh on each press |
+| Hover | Expand after 120 ms; collapse 250 ms after leaving |
+| Click Dormant/Compact | Expand immediately |
+| Click tab | Change tab with sprung pill and content fade |
+| Ctrl+Alt+F12 | Toggle all implemented layout bounding boxes |
+| Ctrl+Shift+F | Toggle active FPS / settled `IDLE` |
 
-### Shortcuts
+The HUD has priority over hover. A timed HUD returns to the current base/hover
+state. `V/B/P` replace a pinned HUD with a timed one. Key auto-repeat does not
+retrigger. Demo state selection consumes pending hover entry so `1`/`2` remain
+visible until you leave/re-enter. Ctrl/Alt/Shift combinations are not demo inputs.
 
-- **Ctrl+Alt+F12:** bounding rectangles (Aqua, 1 DIP).
-- **Ctrl+Shift+F:** independent FPS overlay toggle.
+Data is **fictional and static** in M1: media controls, seeking, real files,
+telemetry polling and system volume/brightness actions arrive in later milestones.
+The clock samples local time when rendering; it does not have a periodic M1 timer.
 
-If another application owns a shortcut, a debugger diagnostic is emitted and the
-command-line/config alternatives remain available. M0 always renders a settled
-state, so FPS reads **IDLE**; no refresh timer runs just to refresh this label.
-Keys 1–4 and V/B/P are reserved for M1, not implemented in M0.
+With Windows animation effects off, shapes/tab positions snap, waves stop at the
+minimum height, and both fades take 100 ms with no delay or blur.
 
-No tray menu exists until M3. Close M0 through Task Manager, or:
+## Options and shutdown
+
+- `--demo`: enable the keys above; start Dormant.
+- `--demo-media-active`: with `--demo`, show active Dormant dot.
+- `--debug-bounds`, `--show-debug-fps`: start with the respective debug overlay.
+- `--config <path>`: read an explicitly selected config containing `showDebugFps=true`
+  or `showDebugFps=false`; command-line flags override it.
+- `--verify-device-recovery`: tear down GPU resources after the first Present and
+  recreate them. This is **not** a real GPU driver-failure injection.
+
+Only one instance runs. No tray/menu until M3. Close through Task Manager, or:
 
 ```powershell
 Stop-Process -Name CaeciliaNotchIsland
 ```
 
-For a graceful test shutdown, send `WM_CLOSE` from a local Win32 test tool/debugger.
-Startup/runtime errors use `OutputDebugString` rather than a focus-stealing dialog.
+Errors go to `OutputDebugString`; no focus-stealing error dialog is opened.
 
-## M0 architecture
+## Architecture and verification
 
-- Fixed 492 × 193 DIP HWND, with primary-monitor `rcMonitor` anchoring.
-- `SetDpi` handles rendering scale; only HWND placement/size and input coordinates
-  cross the physical-pixel/DIP boundary.
-- Required layered/no-redirection/no-activate/topmost/tool window styles.
-- Raw mouse input (`RIDEV_INPUTSINK`) updates geometry-based click-through without
-  a periodic cursor timer. `WS_EX_TRANSPARENT` changes only when inside/outside
-  changes. Raw input never causes an idle `Present`.
-- Shared cached path for hit testing, surface and content mask.
-- Premultiplied composition flip swap chain, transparent clear, clipped Dormant
-  contents; no Dormant surface rim or drop shadow (status glow is separate).
-- Blocking message loop. Paint occurs only on invalidation. Device-loss retries
-  are bounded, with an operational backoff rather than a busy render loop.
-- DirectWrite system-font fallback, exact line height derived from font metrics,
-  character spacing, tabular figures and grayscale antialiasing.
+- Fixed 492 × 193 DIP HWND at primary-monitor `rcMonitor` top center.
+- Shared current geometry for draw/clipping/hit testing; raw mouse input changes
+  `WS_EX_TRANSPARENT` only at inside/outside transitions.
+- Seven springs, semi-implicit Euler at 1/240 s, max elapsed 1/20 s per frame,
+  velocity-preserving retargeting. Window is not resized during animation.
+- Waitable DXGI frame-latency pacing while moving/waving. Blocking input/deadline
+  wait when settled, with a final `IDLE` frame and no idle refresh timer.
+- Masked rim, surface interpolation, shadow SPEED while animating/cached when
+  settled, content fade/blur and grayscale DirectWrite text.
+- Device-loss retries are bounded, not a busy render loop.
 
-**Runtime caveat:** layered + no-redirection + DirectComposition visibility and
-cross-process click-through must be checked on the actual Windows/DWM/driver
-combination. Raw-input processing is asynchronous; test fast boundary crossings
-and clicks rather than assuming an absolute no-race guarantee.
+M0 visibility, debug controls and click-through/focus passed the user's tests.
+M1 animation screenshots, rapid geometry-boundary clicks, DPI changes and GPU
+performance still need validation on the target machine; no no-race guarantee
+is claimed for asynchronous raw-input style changes.
 
-## Specifications and offline checks
-
-`PRD.md` defines scope; `DESIGN.md` and its synchronized
-`src/spec/NotchIslandSpec.h` define visual values. The HTML file is the original
-reference prototype, not a runtime dependency. Do not open its CDN-dependent UI
-when performing a strictly offline validation; the following verifier executes
-only its data/export code, without loading the browser UI:
+Offline spec verification (does not open the HTML's CDN UI):
 
 ```powershell
 node tools/verify-spec.cjs
 ```
 
-The verifier checks Appendix A equality, original HTML declaration values and
-geometry builder, allowing only explicitly approved M0 additions. Node is a
-local development tool, never an application dependency.
+`DESIGN.md` Appendix A equals `src/spec/NotchIslandSpec.h`; numeric visual values
+belong there. The original HTML is a reference, never a runtime dependency.

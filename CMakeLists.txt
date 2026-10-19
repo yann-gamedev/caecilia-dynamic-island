@@ -14,6 +14,9 @@ add_executable(CaeciliaNotchIsland WIN32
     src/render/Painter.cpp
     src/render/TextStyles.cpp
     src/data/DemoSource.cpp
+    src/motion/Spring.cpp
+    src/state/StateMachine.cpp
+    src/input/HoverTracker.cpp
 )
 target_compile_features(CaeciliaNotchIsland PRIVATE cxx_std_20)
 set_target_properties(CaeciliaNotchIsland PROPERTIES CXX_EXTENSIONS OFF)
@@ -44,6 +47,13 @@ if(BUILD_TESTING)
     target_include_directories(CaeciliaGeometryTests PRIVATE src)
     target_link_libraries(CaeciliaGeometryTests PRIVATE d2d1 user32 ole32)
     add_test(NAME geometry COMMAND CaeciliaGeometryTests)
+    add_executable(CaeciliaMotionTests tests/MotionTests.cpp src/motion/Spring.cpp
+        src/state/StateMachine.cpp src/input/HoverTracker.cpp)
+    target_compile_features(CaeciliaMotionTests PRIVATE cxx_std_20)
+    target_compile_definitions(CaeciliaMotionTests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(CaeciliaMotionTests PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
+    target_include_directories(CaeciliaMotionTests PRIVATE src)
+    add_test(NAME motion COMMAND CaeciliaMotionTests)
     find_program(NODE_EXECUTABLE node)
     if(NODE_EXECUTABLE)
         add_test(NAME spec-consistency COMMAND "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/verify-spec.cjs")

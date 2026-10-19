@@ -1,7 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <dcomp.h>
 #include <d2d1_1.h>
 #include <wrl/client.h>
@@ -10,6 +10,7 @@
 namespace caecilia {
 class IslandGeometry;
 class Painter;
+struct Scene;
 
 class Renderer final {
 public:
@@ -17,7 +18,8 @@ public:
     // False means a recoverable device loss; caller schedules a bounded retry.
     bool Render(HWND window, UINT width, UINT height, float dpi,
                 IslandGeometry& geometry, Painter& painter,
-                bool bounds, bool fps, bool mediaActive);
+                const Scene& scene);
+    [[nodiscard]] HANDLE FrameReady() const noexcept { return frameReady_; }
     void Reset() noexcept;
     [[nodiscard]] std::uint64_t PresentCount() const noexcept { return presents_; }
 private:
@@ -32,6 +34,7 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Device> device_;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> context_;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> target_;
+    HANDLE frameReady_{};
     UINT width_{};
     UINT height_{};
     std::uint64_t presents_{};

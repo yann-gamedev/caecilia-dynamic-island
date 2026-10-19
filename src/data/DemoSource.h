@@ -1,8 +1,8 @@
 #pragma once
 
 namespace caecilia {
-// M0 intentionally has no timeline, state transitions, or background polling.
-// It supplies a reproducible static Dormant sample only.
+// M1 uses deterministic spec samples and App-managed state/animation timing.
+// No media, telemetry, audio, brightness, or network APIs are read here.
 class DemoSource final {
 public:
     explicit DemoSource(bool mediaActive = false) noexcept : mediaActive_(mediaActive) {}

@@ -9,6 +9,11 @@ a substitute for the required MSVC build or visual acceptance on Windows 11.
 
 No application performance figures have been measured. No NFR is claimed passed.
 
+M1 adds waitable swap-chain frame pacing and fixed-step animation tests; these
+prove scheduling/integrator behavior, not runtime CPU/GPU cost. M0 visual,
+debug and click-through checks were accepted by the user; M1 screenshot/Present
+captures remain pending. The portable MinGW build is an alternative test artifact.
+
 | Requirement | Target | M0 result |
 |---|---|---|
 | NFR-01 idle CPU | < 0.5% | Unmeasured; no continuous render/cursor timer in source |
