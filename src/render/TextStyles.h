@@ -14,7 +14,7 @@ namespace caecilia {
 
 class TextStyles {
 public:
-    void Initialize();
+    void Initialize(NotchIsland::TitleFont titleFont = NotchIsland::kDefaultConfig.titleFont);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> IdleLayout();
     Microsoft::WRL::ComPtr<IDWriteTextLayout> Layout(std::wstring_view text,
         NotchIsland::Typography::Role role, D2D1_RECT_F rect,

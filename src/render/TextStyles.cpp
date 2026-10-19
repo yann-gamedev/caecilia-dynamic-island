@@ -71,7 +71,7 @@ ComPtr<IDWriteTextFormat> CreateFormat(
 
 } // namespace
 
-void TextStyles::Initialize()
+void TextStyles::Initialize(Spec::TitleFont titleFont)
 {
     ComPtr<IDWriteFactory> factory;
     Check(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -82,8 +82,11 @@ void TextStyles::Initialize()
 
     decltype(formats_) formats;
     for (std::size_t index = 0; index < formats.size(); ++index) {
-        formats[index] = CreateFormat(factory.Get(), collection.Get(),
-            Spec::Typography::Styles[index]);
+        auto style = Spec::Typography::Styles[index];
+        if (index == static_cast<std::size_t>(Spec::Typography::Role::MediaTitle) && titleFont == Spec::TitleFont::Sans) {
+            style.family = Spec::Typography::TelemetryValue.family; // Segoe UI Variable Display, same title metrics.
+        }
+        formats[index] = CreateFormat(factory.Get(), collection.Get(), style);
     }
 
     // Commit only after every role and its fallback have been validated.

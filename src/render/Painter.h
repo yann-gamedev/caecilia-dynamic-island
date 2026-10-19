@@ -7,7 +7,7 @@ namespace caecilia {
 class IslandGeometry;
 class Painter final {
 public:
-    void Initialize();
+    void Initialize(NotchIsland::TitleFont titleFont);
     void Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const Scene& scene);
 private:
     TextStyles text_;

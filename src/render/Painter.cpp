@@ -125,7 +125,7 @@ private:
         }
         auto gradient = Gradient(context_, {rect.rect.left, rect.rect.top},
             vertical ? D2D1::Point2F(rect.rect.left, rect.rect.bottom) : D2D1::Point2F(rect.rect.right, rect.rect.top),
-            Color::Aqua, Color::Sky);
+            AccentStart(scene_.accentColor), scene_.accentColor);
         context_->FillRoundedRectangle(rect, gradient.Get());
     }
     void Bar(D2D1_ROUNDED_RECT rect, float fraction) {
@@ -180,7 +180,7 @@ void LayoutPainter::Ring(D2D1_RECT_F rect, float fraction, float stroke, D2D1_CO
     if (!glowPass_) context_->DrawEllipse(D2D1::Ellipse(center, radius, radius), Brush(Color::Track), stroke);
     fraction = Unit(fraction);
     if (fraction <= PaintSpec::Zero) return;
-    // Only Sky accents feed the Sky glow mask; Focus has no glow token.
+    // Only configurable accents feed the glow mask; Focus has no glow token.
     if (glowPass_ && !glow) return;
     const auto ink = Brush(glowPass_ ? Color::Core : color);
     if (fraction == PaintSpec::Unit) {
@@ -336,7 +336,7 @@ void LayoutPainter::Dormant() {
     ring.radiusX -= inset;
     ring.radiusY -= inset;
     context_->DrawRoundedRectangle(ring, Brush(Color::LensRing), PaintSpec::LensStroke);
-    auto dot = Color::Aqua;
+    auto dot = AccentStart(scene_.accentColor);
     dot.a *= opacity;
     Fill(Idle::Status, dot);
 }
@@ -392,7 +392,7 @@ void LayoutPainter::NowPlaying() {
     const D2D1_RECT_F rings[]{CpuRing.rect, RamRing.rect};
     const D2D1_RECT_F labels[]{CpuLabel, RamLabel};
     for (std::size_t i = 0; i < std::size(rings); ++i) {
-        Ring(rings[i], Demo::Telemetry[i] / Demo::Percent, PaintSpec::RingStroke, Color::Sky, true);
+        Ring(rings[i], Demo::Telemetry[i] / Demo::Percent, PaintSpec::RingStroke, scene_.accentColor, true);
         Text(Integer(Demo::Telemetry[i]), Typography::Role::TelemetryValue, rings[i], Color::Label,
             DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         Text(Demo::TelemetryLabels[i], Typography::Role::MicroLabel, labels[i], Color::Label3, DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -431,7 +431,7 @@ void LayoutPainter::Tray() {
     for (std::size_t i = 0; i < std::size(tiles); ++i) {
         Fill(tiles[i], Color::Fill);
         const auto& rect = tiles[i].rect;
-        FileGlyph({rect.left + TileIconOffset.x, rect.top + TileIconOffset.y}, i == 0 ? Color::Sky : Color::Label2);
+        FileGlyph({rect.left + TileIconOffset.x, rect.top + TileIconOffset.y}, i == 0 ? scene_.accentColor : Color::Label2);
         const D2D1_RECT_F name{rect.left + TileNameOffset.x, rect.top + TileNameOffset.y,
             rect.right - TileNameRightInset, rect.top + TileNameOffset.y + Typography::TabClock.lineHeight};
         Text(Demo::FileNames[i], Typography::Role::TabClock, name, Color::Label);
@@ -472,7 +472,7 @@ void LayoutPainter::Draw(const ContentLayer& layer) {
 
 } // namespace
 
-void Painter::Initialize() { text_.Initialize(); }
+void Painter::Initialize(TitleFont titleFont) { text_.Initialize(titleFont); }
 
 void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const Scene& scene) {
     context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -512,7 +512,9 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
     auto content = [&](const ContentLayer& layer, bool collectBounds) -> ComPtr<ID2D1Image> {
         LayoutPainter glowPainter(context, geometry.Factory(), text_, scene, true);
         auto glowMask = Record(context, [&] { glowPainter.Draw(layer); });
-        auto glow = Shadow(context, glowMask.Get(), PaintSpec::GlowSigma, Color::Glow, scene.animating);
+        auto glowColor = scene.accentColor;
+        glowColor.a = Color::Glow.a;
+        auto glow = Shadow(context, glowMask.Get(), PaintSpec::GlowSigma, glowColor, scene.animating);
         LayoutPainter painter(context, geometry.Factory(), text_, scene, false);
         auto commands = Record(context, [&] {
             context->DrawImage(glow.Get(), PaintSpec::GlowOffset);

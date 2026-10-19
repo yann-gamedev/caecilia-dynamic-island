@@ -1,7 +1,7 @@
 #include "app/App.h"
 #include "app/Errors.h"
 #include <shellapi.h>
-#include <fstream>
+#include "app/Config.h"
 #include <string>
 #include <string_view>
 #include <utility>
@@ -10,23 +10,6 @@
 #include <algorithm>
 
 namespace caecilia {
-namespace {
-void ReadConfig(AppOptions& options) {
-    if (options.config.empty()) { return; }
-    std::ifstream input(options.config);
-    if (!input) { throw std::runtime_error("Cannot open requested config file"); }
-    std::string line;
-    while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '\r') { line.pop_back(); }
-        if (line.empty() || line.front() == '#') { continue; }
-        if (line == "showDebugFps=true") { options.showDebugFps = true; }
-        else if (line == "showDebugFps=false") { options.showDebugFps = false; }
-        else { throw std::runtime_error("Unknown config entry; expected showDebugFps=true or false"); }
-    }
-    if (input.bad()) { throw std::runtime_error("Config read failed"); }
-}
-}
-
 AppOptions ParseOptions() {
     int argc{};
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -40,7 +23,9 @@ AppOptions ParseOptions() {
                 options.config = argv[i];
             }
         }
-        ReadConfig(options);
+        const auto config = LoadConfig(options.config);
+        options.userConfig = config.user;
+        options.showDebugFps = config.showDebugFps;
         for (int i = 1; i < argc; ++i) {
             const std::wstring_view arg(argv[i]);
             if (arg == L"--demo") { options.demo = true; }
@@ -60,7 +45,7 @@ AppOptions ParseOptions() {
 }
 
 App::App(AppOptions options) : options_(std::move(options)),
-    demo_(options_.demo && options_.demoMediaActive) {}
+    demo_(options_.demo && options_.demoMediaActive), hover_(options_.userConfig.hoverDelayMs) {}
 
 App::~App() {
     // DComp references must be released before the target HWND is destroyed.
@@ -99,12 +84,13 @@ double App::Now() const noexcept {
 
 int App::Run(HINSTANCE instance) {
     geometry_.Initialize();
-    painter_.Initialize();
+    painter_.Initialize(options_.userConfig.titleFont);
+    scene_.accentColor = options_.userConfig.accentColor;
     scene_.mediaActive = demo_.MediaActive();
     BOOL animations = TRUE;
     CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
     scene_.reducedMotion = animations == FALSE;
-    window_.Create(instance, geometry_, *this);
+    window_.Create(instance, geometry_, *this, options_.userConfig.monitorIndex);
     if (options_.demo) { window_.EnableDemoKeyboard(); }
     window_.Show();
     lastTick_ = Now();

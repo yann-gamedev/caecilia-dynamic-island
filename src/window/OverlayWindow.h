@@ -21,7 +21,7 @@ struct WindowEvents {
 class OverlayWindow final {
 public:
     ~OverlayWindow();
-    void Create(HINSTANCE instance, IslandGeometry& geometry, WindowEvents& events);
+    void Create(HINSTANCE instance, IslandGeometry& geometry, WindowEvents& events, int monitorIndex);
     void Show();
     void EnableDemoKeyboard();
     void Reposition();
@@ -46,6 +46,7 @@ private:
     HINSTANCE instance_{};
     IslandGeometry* geometry_{};
     WindowEvents* events_{};
+    int monitorIndex_{}; // Keep the requested index when a disconnected display falls back to primary.
     UINT dpi_{};
     UINT width_{};
     UINT height_{};

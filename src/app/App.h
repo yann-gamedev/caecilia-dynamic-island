@@ -18,6 +18,7 @@ struct AppOptions {
     bool debugBounds{NotchIsland::DebugHud::ShowBoundsDefault};
     bool verifyDeviceRecovery{};
     std::filesystem::path config;
+    NotchIsland::UserConfig userConfig{NotchIsland::kDefaultConfig};
 };
 AppOptions ParseOptions();
 

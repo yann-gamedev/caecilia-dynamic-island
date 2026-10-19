@@ -12,6 +12,7 @@ struct ContentLayer {
 };
 struct Scene {
     NotchIsland::IslandGeom geometry{NotchIsland::kGeomIdle};
+    D2D1_COLOR_F accentColor{NotchIsland::kDefaultConfig.accentColor};
     ContentLayer incoming;
     ContentLayer outgoing;
     bool hasOutgoing{};

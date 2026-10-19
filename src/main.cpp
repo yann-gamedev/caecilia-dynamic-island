@@ -1,9 +1,21 @@
 #include "app/App.h"
 #include "app/Errors.h"
-#include <objbase.h>
+#include <roapi.h>
+#include <bit>
 #include <exception>
 
 namespace {
+bool IsWindows11() noexcept {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!ntdll) { return false; }
+    using RtlGetVersionFn = LONG (WINAPI*)(OSVERSIONINFOW*);
+    const auto getVersion = std::bit_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion"));
+    OSVERSIONINFOW version{};
+    version.dwOSVersionInfoSize = sizeof(version);
+    return getVersion && getVersion(&version) >= 0 &&
+        version.dwMajorVersion >= 10 && version.dwBuildNumber >= 22000;
+}
+
 class UniqueHandle final {
 public:
     explicit UniqueHandle(HANDLE handle) noexcept : handle_(handle) {}
@@ -15,14 +27,18 @@ private:
 };
 class Apartment final {
 public:
-    Apartment() { caecilia::Check(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED), "CoInitializeEx"); }
-    ~Apartment() { CoUninitialize(); }
+    Apartment() { caecilia::Check(RoInitialize(RO_INIT_SINGLETHREADED), "RoInitialize"); }
+    ~Apartment() { RoUninitialize(); }
     Apartment(const Apartment&) = delete;
     Apartment& operator=(const Apartment&) = delete;
 };
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    if (!IsWindows11()) {
+        MessageBoxW(nullptr, L"Notch Island membutuhkan Windows 11", L"Notch Island", MB_OK | MB_ICONERROR);
+        return 1;
+    }
     try {
         caecilia::CheckWin32(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2),
                             "SetProcessDpiAwarenessContext");

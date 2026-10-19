@@ -3,9 +3,14 @@
 #include "app/Errors.h"
 #include "spec/NotchIslandSpec.h"
 #include <windowsx.h>
+#include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <cwchar>
 #include <exception>
 #include <limits>
+#include <tuple>
+#include <vector>
 
 namespace caecilia {
 namespace {
@@ -19,12 +24,54 @@ constexpr UINT kOutsideDownMessage = WM_APP + 2;
 HWND gHookTarget{}; // Single-instance app; the LL hook callback has no user data.
 // Operational device-recovery backoff, not an animation or visual duration.
 constexpr UINT kRecoveryBackoffMs = 1000;
+
+struct MonitorList {
+    std::vector<MONITORINFOEXW> monitors;
+    std::exception_ptr error;
+};
+
+BOOL CALLBACK CollectMonitor(HMONITOR handle, HDC, LPRECT, LPARAM data) noexcept {
+    auto& list = *reinterpret_cast<MonitorList*>(data);
+    try {
+        MONITORINFOEXW monitor{};
+        monitor.cbSize = sizeof(monitor);
+        CheckWin32(GetMonitorInfoW(handle, &monitor), "GetMonitorInfo");
+        list.monitors.push_back(monitor);
+        return TRUE;
+    } catch (...) {
+        list.error = std::current_exception();
+        return FALSE;
+    }
+}
+
+MONITORINFOEXW SelectMonitor(int requestedIndex) {
+    MonitorList list;
+    const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, CollectMonitor,
+                                                reinterpret_cast<LPARAM>(&list));
+    if (list.error) { std::rethrow_exception(list.error); }
+    CheckWin32(enumerated, "EnumDisplayMonitors");
+    if (list.monitors.empty()) { throw std::runtime_error("No display monitors available"); }
+    const auto order = [](const MONITORINFOEXW& a, const MONITORINFOEXW& b) {
+        const auto aKey = std::tuple{!(a.dwFlags & MONITORINFOF_PRIMARY), a.rcMonitor.left, a.rcMonitor.top};
+        const auto bKey = std::tuple{!(b.dwFlags & MONITORINFOF_PRIMARY), b.rcMonitor.left, b.rcMonitor.top};
+        // Device name breaks ties for displays sharing the same origin.
+        return aKey != bKey ? aKey < bKey : std::wcscmp(a.szDevice, b.szDevice) < 0;
+    };
+    std::sort(list.monitors.begin(), list.monitors.end(), order);
+    const size_t index = requestedIndex >= 0 && static_cast<size_t>(requestedIndex) < list.monitors.size()
+        ? static_cast<size_t>(requestedIndex) : 0;
+    assert(std::is_sorted(list.monitors.begin(), list.monitors.end(), order));
+    assert((list.monitors.front().dwFlags & MONITORINFOF_PRIMARY) != 0);
+    assert(index < list.monitors.size());
+    return list.monitors[index];
+}
 }
 
 OverlayWindow::~OverlayWindow() { Close(); }
 
-void OverlayWindow::Create(HINSTANCE instance, IslandGeometry& geometry, WindowEvents& events) {
+void OverlayWindow::Create(HINSTANCE instance, IslandGeometry& geometry, WindowEvents& events, int monitorIndex) {
     instance_ = instance;
+    monitorIndex_ = monitorIndex;
     geometry_ = &geometry;
     events_ = &events;
     WNDCLASSEXW wc{};
@@ -73,11 +120,7 @@ void OverlayWindow::Reposition() {
     if (positioning_) { return; }
     positioning_ = true;
     try {
-        const POINT primaryOrigin{};
-        MONITORINFO monitor{};
-        monitor.cbSize = sizeof(monitor);
-        CheckWin32(GetMonitorInfoW(MonitorFromPoint(primaryOrigin, MONITOR_DEFAULTTOPRIMARY), &monitor),
-                   "GetMonitorInfo");
+        const auto monitor = SelectMonitor(monitorIndex_);
         dpi_ = GetDpiForWindow(hwnd_);
         CheckWin32(dpi_ != 0, "GetDpiForWindow");
         using namespace NotchIsland;
@@ -287,7 +330,7 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_DPICHANGED:
         dpi_ = HIWORD(wparam);
         if (positioning_) {
-            // SetWindowPos can synchronously cross into a different-DPI primary
+            // SetWindowPos can synchronously cross into a different-DPI selected
             // monitor. Do not discard this notification or recursively reposition.
             if (!repositionPending_) {
                 CheckWin32(PostMessageW(hwnd_, kRepositionMessage, 0, 0), "Post DPI reposition");

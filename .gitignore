@@ -1,5 +1,6 @@
 # Local CMake / MSVC build output
 /build/
+/build-*/
 /out/
 /.vs/
 /CMakeUserPresets.json

@@ -5,7 +5,7 @@ namespace caecilia {
 void HoverTracker::Pointer(bool inside, double now) noexcept {
     if (inside == inside_) { return; }
     inside_ = inside;
-    const auto delay = inside ? NotchIsland::Motion::HoverEnterMs : NotchIsland::Motion::HoverLeaveMs;
+    const auto delay = inside ? enterDelayMs_ : NotchIsland::Motion::HoverLeaveMs;
     // One deadline represents either enter or leave, so the opposite timer is cancelled.
     deadline_ = now + delay / NotchIsland::Motion::MillisecondsPerSecond;
 }

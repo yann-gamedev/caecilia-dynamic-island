@@ -12,12 +12,12 @@ try {
         '-DUNICODE', '-D_UNICODE', '-DNOMINMAX', '-DWIN32_LEAN_AND_MEAN',
         '-DWINVER=0x0A00', '-D_WIN32_WINNT=0x0A00', '-Isrc', '-static',
         '-static-libgcc', '-static-libstdc++')
-    $sources = @('src/main.cpp', 'src/app/App.cpp', 'src/window/OverlayWindow.cpp',
+    $sources = @('src/main.cpp', 'src/app/App.cpp', 'src/app/Config.cpp', 'src/window/OverlayWindow.cpp',
         'src/render/Renderer.cpp', 'src/render/IslandGeometry.cpp',
         'src/render/Painter.cpp', 'src/render/TextStyles.cpp', 'src/data/DemoSource.cpp',
         'src/motion/Spring.cpp', 'src/state/StateMachine.cpp', 'src/input/HoverTracker.cpp')
     & $Compiler @flags -municode -mwindows @sources -o "$output\CaeciliaNotchIsland.exe" `
-        -ld3d11 -ldxgi -ld2d1 -ldcomp -ldwrite -ldxguid -luuid -luser32 -lgdi32 -lole32 -lshell32
+        -ld3d11 -ldxgi -ld2d1 -ldcomp -ldwrite -ldxguid -luuid -luser32 -lgdi32 -lole32 -lshell32 -lruntimeobject
     if ($LASTEXITCODE -ne 0) { throw 'Portable application compilation failed' }
     & $Compiler @flags tests/GeometryTests.cpp src/render/IslandGeometry.cpp `
         -o "$output\CaeciliaGeometryTests.exe" -ld2d1 -lole32 -luuid
@@ -29,8 +29,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Motion test compilation failed' }
     & "$output\CaeciliaMotionTests.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Motion tests failed' }
+    & $Compiler @flags tests/ConfigTests.cpp src/app/Config.cpp src/input/HoverTracker.cpp `
+        src/render/TextStyles.cpp -o "$output\CaeciliaConfigTests.exe" -ldwrite -lole32 -lshell32 -luuid -lruntimeobject
+    if ($LASTEXITCODE -ne 0) { throw 'Config test compilation failed' }
+    & "$output\CaeciliaConfigTests.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Config tests failed' }
     Write-Host "Portable M1 build: $output"
-    Write-Host 'Alternative MinGW build only; MSVC /W4 acceptance remains pending.'
+    Write-Host 'Alternative MinGW build; run CMake/CTest separately for MSVC verification.'
 } finally {
     Pop-Location
 }

@@ -74,4 +74,42 @@ transparency, debug toggles, and cross-process click-through/no focus stealing.
 M0 is accepted for proceeding to M1, explicitly authorized by the user.
 This does not assert separate 100%/150% measurements, MSVC verification, driver
 failure injection, or performance captures; the detailed unmeasured items above
-remain unchecked. Implementation notes in this document describe the M0 snapshot.
+remain unchecked. Implementation notes above describe the original M0 snapshot.
+
+## M0 v0.2 follow-up
+
+Implemented after M1:
+- Native JSON config in RoamingAppData with per-field defaults, create-once persistence,
+  malformed-file preservation, and optional `--config` JSON override.
+- Configured hover delay, primary-first/left-sorted monitor selection (including display
+  change/DPI handling), accent gradients/glow, and serif/sans media title.
+- `RtlGetVersion` startup gate with the required Windows 11 message below build 22000.
+- Tray reload remains M3; restart to apply config changes.
+
+Executed: VS 2026 MSVC 19.51 / Windows SDK 10.0.26100.0 Debug and Release builds
+with `/W4 /WX`; CTest geometry, motion, config and spec-consistency pass in both.
+MinGW portable build and all three native tests also pass. Config tests cover JSON/UTF-8,
+BOM/escapes, field defaults/clamping, create-once/preservation, 0/800/1000 ms hover,
+unchanged collapse delay, accent math, and actual DirectWrite title families.
+Tests use temporary files, not the user's roaming config.
+
+### Manual acceptance procedure (pending)
+
+1. Close all running instances. Back up `%APPDATA%\NotchIsland\config.json` if present,
+   then rename it temporarily. Run `build-msvc\Release\CaeciliaNotchIsland.exe --demo`.
+   Confirm the config file is created with the five defaults above and the island
+   appears top-center on the primary monitor. Close/relaunch; the file must stay unchanged.
+2. Close the app, set `titleFont` to `"sans"`, `accentColor` to `"#E040A0"`, and
+   `hoverDelayMs` to `800`. Relaunch. Hover should swell immediately, then expand after
+   about 0.8 s; leaving still collapses after 0.25 s. Title is sans; progress/wave/rings
+   and glow use the pink accent. Labels/surfaces and Pomodoro orange stay unchanged.
+   Repeat with delay `0`: expand without waiting. Left-click must still pin immediately.
+3. With two or more monitors, set `monitorIndex` to `1`, restart, and confirm the island
+   is centered at the top of the leftmost non-primary monitor. Check mixed 100%/150% DPI,
+   disconnect/reconnect, and change primary display. Set `999` and confirm primary fallback.
+4. Try `{"titleFont":"sans","accentColor":"bad","hoverDelayMs":"bad"}`:
+   sans remains, while color and delay fall back. Try malformed JSON (e.g. `{`): defaults
+   apply and the malformed bytes remain unchanged. Restore the backup/default config afterward.
+5. On a Windows 10 test VM (not compatibility mode), launch the executable: it must show
+   `Notch Island membutuhkan Windows 11`, then exit without an overlay/config write.
+   The unsupported-OS branch and multi-monitor visual results are not claimed as tested.

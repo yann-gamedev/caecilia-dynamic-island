@@ -2,12 +2,13 @@ cmake_minimum_required(VERSION 3.25)
 project(CaeciliaNotchIsland VERSION 0.1.0 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT MSVC)
-    message(FATAL_ERROR "Caecilia requires Windows and MSVC (VS 2022). No automatic dependency downloads.")
+    message(FATAL_ERROR "Caecilia requires Windows and MSVC. No automatic dependency downloads.")
 endif()
 
 add_executable(CaeciliaNotchIsland WIN32
     src/main.cpp
     src/app/App.cpp
+    src/app/Config.cpp
     src/window/OverlayWindow.cpp
     src/render/Renderer.cpp
     src/render/IslandGeometry.cpp
@@ -26,9 +27,9 @@ target_compile_definitions(CaeciliaNotchIsland PRIVATE
 target_compile_options(CaeciliaNotchIsland PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
 target_include_directories(CaeciliaNotchIsland PRIVATE src)
 target_link_libraries(CaeciliaNotchIsland PRIVATE
-    d3d11 dxgi d2d1 dcomp dwrite dxguid uuid user32 gdi32 ole32 shell32)
+    d3d11 dxgi d2d1 dcomp dwrite dxguid uuid user32 gdi32 ole32 shell32 runtimeobject)
 
-# M0 uses Windows SDK COM interfaces only. C++/WinRT is needed by the M2
+# M0 uses Windows SDK COM/WinRT ABI interfaces (native JSON). C++/WinRT is needed by the M2
 # media implementation; this optional local path does not fetch packages.
 set(CAECILIA_CPPWINRT_INCLUDE_DIR "" CACHE PATH "Offline C++/WinRT include folder (contains winrt/base.h)")
 if(CAECILIA_CPPWINRT_INCLUDE_DIR)
@@ -54,6 +55,14 @@ if(BUILD_TESTING)
     target_compile_options(CaeciliaMotionTests PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
     target_include_directories(CaeciliaMotionTests PRIVATE src)
     add_test(NAME motion COMMAND CaeciliaMotionTests)
+    add_executable(CaeciliaConfigTests tests/ConfigTests.cpp src/app/Config.cpp
+        src/input/HoverTracker.cpp src/render/TextStyles.cpp)
+    target_compile_features(CaeciliaConfigTests PRIVATE cxx_std_20)
+    target_compile_definitions(CaeciliaConfigTests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(CaeciliaConfigTests PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
+    target_include_directories(CaeciliaConfigTests PRIVATE src)
+    target_link_libraries(CaeciliaConfigTests PRIVATE dwrite ole32 shell32 uuid runtimeobject)
+    add_test(NAME config COMMAND CaeciliaConfigTests)
     find_program(NODE_EXECUTABLE node)
     if(NODE_EXECUTABLE)
         add_test(NAME spec-consistency COMMAND "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/verify-spec.cjs")
