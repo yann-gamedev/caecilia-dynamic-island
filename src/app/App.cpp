@@ -7,6 +7,7 @@
 #include <utility>
 #include <cmath>
 #include <iterator>
+#include <algorithm>
 
 namespace caecilia {
 namespace {
@@ -150,20 +151,29 @@ DWORD App::DeadlineWait(double now) const noexcept {
 }
 
 void App::Transition(double now) {
+    window_.SetOutsideClickHook(state_.Pinned()); // WH_MOUSE_LL only while pinned.
     const auto next = state_.Current();
-    if (scene_.incoming.state == next && (next != IslandState::Hud || scene_.incoming.hud == state_.Hud())) { return; }
+    const bool swell = state_.Swell() && !scene_.reducedMotion; // DESIGN 8.3: no swell.
+    const bool contentChanged = scene_.incoming.state != next ||
+        (next == IslandState::Hud && scene_.incoming.hud != state_.Hud());
+    if (!contentChanged && swell == swell_) { return; }
     const auto previous = scene_.incoming.state;
-    scene_.outgoing = scene_.incoming;
-    outgoingStartOpacity_ = scene_.outgoing.opacity;
-    scene_.hasOutgoing = true;
-    scene_.incoming.state = next;
-    scene_.incoming.hud = state_.Hud();
-    scene_.incoming.opacity = PaintSpec::Zero;
-    scene_.incoming.blur = scene_.reducedMotion ? PaintSpec::Zero : Motion::ContentBlur;
-    fadeStart_ = now;
+    if (contentChanged) {
+        scene_.outgoing = scene_.incoming;
+        outgoingStartOpacity_ = scene_.outgoing.opacity;
+        scene_.hasOutgoing = true;
+        scene_.incoming.state = next;
+        scene_.incoming.hud = state_.Hud();
+        scene_.incoming.opacity = PaintSpec::Zero;
+        scene_.incoming.blur = scene_.reducedMotion ? PaintSpec::Zero : Motion::ContentBlur;
+        fadeStart_ = now;
+        fading_ = true;
+    }
     lastTick_ = now; // Time spent idle before this event must not advance the new target.
-    fading_ = true;
-    if (previous != next) { springs_.SetTarget(GeometryFor(next), SpringFor(previous, next)); }
+    // SetTarget keeps position and velocity, so ToExpanded takes over mid-swell (DESIGN 3.2).
+    if (previous != next) { springs_.SetTarget(TargetGeometry(next, swell), SpringFor(previous, next)); }
+    else if (swell != swell_) { springs_.SetTarget(TargetGeometry(next, swell), Spring::HoverSwell); }
+    swell_ = swell;
     if (scene_.reducedMotion) { springs_.Snap(); }
     dirty_ = true;
 }
@@ -171,7 +181,7 @@ void App::Transition(double now) {
 void App::Tick(double now) {
     const double elapsed = (std::max)(0.0, now - lastTick_);
     state_.Tick(now);
-    if (const auto expanded = hover_.Tick(now)) { state_.SetExpanded(*expanded); }
+    if (const auto expanded = hover_.Tick(now)) { state_.SetHoverExpanded(*expanded); }
     Transition(now);
     const bool wasMoving = !springs_.Settled() || !IsSettled(tabSpring_) || fading_;
     if (scene_.reducedMotion) { springs_.Snap(); }
@@ -250,16 +260,48 @@ void App::OnResume() {
     OnDraw();
 }
 void App::OnPointer(bool inside) {
+    const double now = Now();
     pointerInside_ = inside;
-    hover_.Pointer(inside, Now());
+    hover_.Pointer(inside, now);
+    state_.SetHovered(inside);
+    Transition(now); // Swell starts on the next frame.
+}
+void App::OnMiddleClick() {
+    // ponytail: M1 demo toggles the wave only; SMTC TryTogglePlayPauseAsync arrives in M2.
+    if (state_.Current() != IslandState::Compact || !options_.demo) { return; }
+    scene_.mediaActive = !scene_.mediaActive;
+    OnDraw();
+}
+void App::OnOutsideMouseDown() {
+    if (!state_.Pinned()) { return; }
+    state_.Unpin();
+    Transition(Now());
 }
 void App::OnClick(D2D1_POINT_2F point) {
     const double now = Now();
-    if (state_.Current() == IslandState::Dormant || state_.Current() == IslandState::Compact) {
-        state_.SetExpanded(true); Transition(now); return;
+    const auto current = state_.Current();
+    if (current == IslandState::Dormant || current == IslandState::Compact) {
+        state_.Pin(); Transition(now); return;
     }
-    if (state_.Current() != IslandState::Expanded) { return; }
-    const D2D1_RECT_F tabs[] = {ExpandedNowPlaying::Tab0, ExpandedNowPlaying::Tab1, ExpandedNowPlaying::Tab2};
+    if (current != IslandState::Expanded) { return; }
+    // Body point -> content point (content origin is centered, DESIGN 5.1).
+    point.x -= (scene_.geometry.width - kGeomExpanded.width) * WindowSpec::Half;
+    using namespace ExpandedNowPlaying;
+    const D2D1_RECT_F tabs[] = {Tab0, Tab1, Tab2};
+    const unsigned activeTab = scene_.incoming.tab;
+    bool control = std::any_of(std::begin(tabs), std::end(tabs), [&](auto r) { return Hit(r, point); });
+    if (activeTab == 0) {
+        for (const auto r : {Prev.rect, Play.rect, Next.rect, ScrubHit}) { control = control || Hit(r, point); }
+    } else if (activeTab == 2) {
+        for (const auto& t : {ExpandedDropTray::Tile0, ExpandedDropTray::Tile1, ExpandedDropTray::Tile2}) {
+            control = control || Hit(t.rect, point);
+        }
+    }
+    if (!control) { // Empty area toggles the pin (DESIGN 9).
+        if (state_.Pinned()) { state_.Unpin(); } else { state_.Pin(); }
+        Transition(now);
+        return;
+    }
     for (unsigned tab = 0; tab < std::size(tabs); ++tab) {
         if (!Hit(tabs[tab], point) || scene_.incoming.tab == tab) { continue; }
         scene_.outgoing = scene_.incoming;
@@ -280,13 +322,17 @@ void App::OnDemoKey(UINT key) {
     switch (key) {
     case '1': case '2':
         state_.DismissHud();
+        // Unpin while hovered sets suppressHover, so the chosen base stays observable.
+        state_.Unpin();
         state_.SetBase(key == '1' ? IslandState::Dormant : IslandState::Compact, now);
         scene_.mediaActive = key == '2' || demo_.MediaActive();
-        // Consume pending hover entry so an explicit demo choice is observable.
-        hover_ = HoverTracker{}; hover_.Pointer(true, now);
-        (void)hover_.Tick(now + Motion::HoverEnterMs / Motion::MillisecondsPerSecond);
         break;
-    case '3': state_.DismissHud(); state_.SetExpanded(true); break;
+    case '3': state_.DismissHud(); state_.Pin(); break;
+    case VK_SPACE: // Fake play/pause; paused grace visuals arrive in M2.
+        scene_.mediaActive = !scene_.mediaActive;
+        if (scene_.mediaActive) { state_.SetBase(IslandState::Compact, now); }
+        break;
+    case 'C': state_.CloseMedia(now); scene_.mediaActive = false; break;
     case '4': state_.PinHud(HudKind::Volume); break;
     case 'V': state_.TriggerHud(HudKind::Volume, now); break;
     case 'B': state_.TriggerHud(HudKind::Brightness, now); break;

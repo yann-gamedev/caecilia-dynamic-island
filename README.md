@@ -56,21 +56,26 @@ No keys are logged, saved or transmitted. Demo input is only registered with `--
 
 | Input | Action |
 |---|---|
-| `1` | Dormant, cancel HUD |
-| `2` | Compact with active waveform, cancel HUD |
-| `3` | Expanded, cancel HUD |
+| `1` | Dormant, unpin, cancel HUD |
+| `2` | Compact with active waveform, unpin, cancel HUD |
+| `3` | Expanded (pinned), cancel HUD |
 | `4` | Pin Volume HUD until another state selection |
 | `V` / `B` / `P` | Volume / Brightness / Pomodoro HUD for 1800 ms; refresh on each press |
-| Hover | Expand after 120 ms; collapse 250 ms after leaving |
-| Click Dormant/Compact | Expand immediately |
-| Click tab | Change tab with sprung pill and content fade |
+| `Space` | Fake play/pause (wave on/off; playing also selects Compact) |
+| `C` | Close fake media source: Dormant + clear pin |
+| Hover | Swell at once (+8/+2/+1); Expand after 150 ms; collapse 250 ms after leaving |
+| Left click Dormant/Compact | Expand immediately and pin |
+| Left click empty area (Expanded) | Toggle pin; unpinning collapses and suppresses hover until you leave |
+| Mouse down outside (pinned) | Unpin and collapse; the click still reaches the app below |
+| Middle click Compact | Fake play/pause, no expand (SMTC in M2) |
+| Click tab | Change tab with sprung pill and content fade; pin unchanged |
 | Ctrl+Alt+F12 | Toggle all implemented layout bounding boxes |
 | Ctrl+Shift+F | Toggle active FPS / settled `IDLE` |
 
 The HUD has priority over hover. A timed HUD returns to the current base/hover
 state. `V/B/P` replace a pinned HUD with a timed one. Key auto-repeat does not
-retrigger. Demo state selection consumes pending hover entry so `1`/`2` remain
-visible until you leave/re-enter. Ctrl/Alt/Shift combinations are not demo inputs.
+retrigger. `1`/`2` unpin with the cursor on the island, which sets `suppressHover`,
+so the chosen base stays visible until you leave/re-enter. Ctrl/Alt/Shift combinations are not demo inputs.
 
 Data is **fictional and static** in M1: media controls, seeking, real files,
 telemetry polling and system volume/brightness actions arrive in later milestones.

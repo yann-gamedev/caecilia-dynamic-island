@@ -12,6 +12,8 @@ struct WindowEvents {
     virtual void OnResume() = 0;
     virtual void OnPointer(bool inside) = 0;
     virtual void OnClick(D2D1_POINT_2F point) = 0;
+    virtual void OnMiddleClick() = 0;
+    virtual void OnOutsideMouseDown() = 0;
     virtual void OnDemoKey(UINT key) = 0;
     virtual void OnFailure(const char* message) noexcept = 0;
 };
@@ -27,6 +29,8 @@ public:
     void Invalidate();
     void ScheduleRecovery();
     void CancelRecovery() noexcept;
+    // DESIGN 9: WH_MOUSE_LL installed only while pinned; never blocks events.
+    void SetOutsideClickHook(bool enabled);
     void Close() noexcept;
     [[nodiscard]] HWND Handle() const noexcept { return hwnd_; }
     [[nodiscard]] float Dpi() const noexcept { return static_cast<float>(dpi_); }
@@ -35,6 +39,8 @@ public:
     [[nodiscard]] D2D1_POINT_2F BodyPoint(POINT screen) const;
 private:
     static LRESULT CALLBACK Procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept;
+    static LRESULT CALLBACK MouseHook(int code, WPARAM wparam, LPARAM lparam) noexcept;
+    HHOOK mouseHook_{};
     LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
     HWND hwnd_{};
     HINSTANCE instance_{};

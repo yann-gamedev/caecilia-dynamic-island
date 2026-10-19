@@ -33,6 +33,8 @@ private:
     void OnResume() override;
     void OnPointer(bool inside) override;
     void OnClick(D2D1_POINT_2F point) override;
+    void OnMiddleClick() override;
+    void OnOutsideMouseDown() override;
     void OnDemoKey(UINT key) override;
     void OnFailure(const char* message) noexcept override;
     void Tick(double now);
@@ -64,6 +66,7 @@ private:
     bool recoveryVerified_{};
     bool dirty_{true};
     bool fading_{};
+    bool swell_{};
     bool pointerInside_{};
     bool deviceUnavailable_{};
 };

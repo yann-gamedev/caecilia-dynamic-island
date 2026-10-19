@@ -349,7 +349,9 @@ void LayoutPainter::Compact() {
         auto bar = bars[i];
         Box(bar.rect); // Spec envelope as well as the actual scaled bar below.
         float scale = Motion::WaveMinimumScale;
-        if (scene_.mediaActive && !scene_.reducedMotion) {
+        if (scene_.mediaActive && scene_.reducedMotion) {
+            scale = Motion::ReducedMotionWaveHeight / (bar.rect.bottom - bar.rect.top);
+        } else if (scene_.mediaActive) {
             const double milliseconds = scene_.time * Motion::MillisecondsPerSecond - Motion::WavePhaseMs[i];
             const float phase = static_cast<float>(std::fmod(milliseconds, Motion::WavePeriodsMs[i]) / Motion::WavePeriodsMs[i]);
             const float halfPhase = phase < WindowSpec::Half ? phase / WindowSpec::Half :
@@ -563,15 +565,23 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
         context->DrawGeometry(geometry.Path(), rim.Get(), PaintSpec::RimStroke);
         context->SetTransform(D2D1::Matrix3x2F::Translation(offset, WindowSpec::Top));
     }
-    auto drawContent = [&](ID2D1Image* image, float opacity) {
+    // DESIGN 5.1: content origin x = (W_current - W_target) / 2 keeps layouts centered.
+    const auto contentX = [&](const ContentLayer& layer) {
+        return (geom.width - GeometryFor(layer.state).width) * WindowSpec::Half;
+    };
+    auto drawContent = [&](ID2D1Image* image, const ContentLayer& layer) {
         auto fade = D2D1::LayerParameters1();
-        fade.opacity = Unit(opacity);
+        fade.opacity = Unit(layer.opacity);
         context->PushLayer(fade, nullptr);
-        context->DrawImage(image);
+        context->DrawImage(image, D2D1::Point2F(contentX(layer), PaintSpec::Zero));
         context->PopLayer();
     };
-    if (outgoing) drawContent(outgoing.Get(), scene.outgoing.opacity);
-    drawContent(incoming.Get(), scene.incoming.opacity);
+    if (outgoing) drawContent(outgoing.Get(), scene.outgoing);
+    drawContent(incoming.Get(), scene.incoming);
+    for (auto& rect : bounds) {
+        rect.left += contentX(scene.incoming);
+        rect.right += contentX(scene.incoming);
+    }
     if (fps) {
         brush->SetColor(scene.animating ? DebugHud::ActiveColor : DebugHud::IdleColor);
         context->DrawTextLayout({DebugHud::FpsRect.left, DebugHud::FpsRect.top}, fps.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);

@@ -18,6 +18,10 @@ constexpr IslandGeom kGeomCompact { 240.0f, 34.0f, 17.0f, 9.0f, 0.0f, 0.5f, 0.25
 constexpr IslandGeom kGeomExpanded { 400.0f, 145.0f, 28.0f, 14.0f, 1.0f, 1.0f, 1.0f };
 constexpr IslandGeom kGeomHud { 200.0f, 44.0f, 22.0f, 10.0f, 0.0f, 0.75f, 0.4f };
 
+// Screen anchor: left = floor((monitorWidthDip - geom.width) / 2), top = monitor top edge (0).
+
+// Restored M0 tokens (DESIGN Lampiran B). The fixed window realizes the screen anchor above:
+// every geom width is even, so window left + (Width - geom.width) / 2 lands on the same DIP.
 namespace WindowSpec {
   constexpr float Width = 492.0f;
   constexpr float Height = 193.0f;
@@ -43,6 +47,27 @@ namespace PaintSpec {
   constexpr float DotOpacityIdle = 0.35f;
 }
 
+// Hover Swell: added to Dormant / Compact targets while hovered and not yet expanded.
+constexpr float kSwellDeltaWidth        = 8.0f;
+constexpr float kSwellDeltaHeight       = 2.0f;
+constexpr float kSwellDeltaBottomRadius = 1.0f;
+
+// Paused Compact
+constexpr float kPausedArtOpacity = 0.5f;
+constexpr float kPausedDotHeight  = 3.0f;
+
+namespace Timing { // milliseconds
+  constexpr unsigned HoverDelayMsDefault = 150;
+  constexpr unsigned CollapseDelayMs = 250;
+  constexpr unsigned HudVisibleMs = 1800;
+  constexpr unsigned PauseGraceMs = 30000;
+  constexpr unsigned PausedMorphMs = 200;
+  constexpr unsigned ContentFadeInMs = 240;
+  constexpr unsigned ContentFadeDelayMs = 70;
+  constexpr unsigned ContentFadeOutMs = 120;
+  constexpr unsigned TelemetryPollMs = 1000;
+}
+
 namespace Idle {
   constexpr D2D1_RECT_F Body = { WindowSpec::Top, WindowSpec::Top, kGeomIdle.width, kGeomIdle.height };
   constexpr D2D1_RECT_F LeftEar = { -kGeomIdle.earRadius, WindowSpec::Top, WindowSpec::Top, kGeomIdle.earRadius };
@@ -52,11 +77,15 @@ namespace Idle {
 }
 namespace Compact {
   constexpr D2D1_ROUNDED_RECT Art = { { 10.0f, 6.0f, 32.0f, 28.0f }, 6.0f, 6.0f }; // Album art
-  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group; bars are 4.48–16 DIP high, centered on y = 17.
+  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group; playing bars are 4.48–16 DIP high, centered on y = 17.
   constexpr D2D1_ROUNDED_RECT Bar0 = { { 209.0f, 9.0f, 212.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 1
   constexpr D2D1_ROUNDED_RECT Bar1 = { { 215.0f, 9.0f, 218.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 2
   constexpr D2D1_ROUNDED_RECT Bar2 = { { 221.0f, 9.0f, 224.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 3
   constexpr D2D1_ROUNDED_RECT Bar3 = { { 227.0f, 9.0f, 230.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 4
+  constexpr D2D1_ROUNDED_RECT Dot0 = { { 209.0f, 15.5f, 212.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 1
+  constexpr D2D1_ROUNDED_RECT Dot1 = { { 215.0f, 15.5f, 218.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 2
+  constexpr D2D1_ROUNDED_RECT Dot2 = { { 221.0f, 15.5f, 224.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 3
+  constexpr D2D1_ROUNDED_RECT Dot3 = { { 227.0f, 15.5f, 230.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 4
 }
 namespace ExpandedNowPlaying {
   constexpr D2D1_ROUNDED_RECT TabTrack = { { 16.0f, 12.0f, 268.0f, 34.0f }, 11.0f, 11.0f }; // Tab track
@@ -149,6 +178,7 @@ namespace Color { // straight (non-premultiplied) alpha
   constexpr D2D1_COLOR_F Shadow = { 0.000f, 0.000f, 0.000f, 0.550f }; // #000000 @ 0.55
 }
 
+// Restored M0/M1 tokens below (DESIGN Lampiran B); v0.2 values above win on conflict.
 namespace Typography {
   enum class Role : std::size_t { TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue, Count };
   struct Style {
@@ -187,23 +217,24 @@ namespace DebugHud {
   constexpr bool ShowBoundsDefault = false;
 }
 
-// M1 additions: DESIGN sections 5, 8 and 12; original HTML remains unchanged.
 namespace Motion {
   constexpr double FixedStep = 1.0 / 240.0;
   constexpr double MaxFrameDelta = 1.0 / 20.0;
   constexpr double MillisecondsPerSecond = 1000.0;
-  constexpr unsigned HoverEnterMs = 120;
-  constexpr unsigned HoverLeaveMs = 250;
-  constexpr unsigned HudMs = 1800;
-  constexpr unsigned FadeInMs = 240;
-  constexpr unsigned FadeDelayMs = 70;
-  constexpr unsigned FadeOutMs = 120; // Linear.
+  // Compatibility aliases: Timing is the single source (v0.2 hover delay is 150, not 120).
+  constexpr unsigned HoverEnterMs = Timing::HoverDelayMsDefault;
+  constexpr unsigned HoverLeaveMs = Timing::CollapseDelayMs;
+  constexpr unsigned HudMs = Timing::HudVisibleMs;
+  constexpr unsigned FadeInMs = Timing::ContentFadeInMs;
+  constexpr unsigned FadeDelayMs = Timing::ContentFadeDelayMs;
+  constexpr unsigned FadeOutMs = Timing::ContentFadeOutMs; // Linear.
   constexpr unsigned ReducedFadeMs = 100; // Both fades, no delay/blur; fade-in cubic, fade-out linear.
   constexpr float ContentBlur = 3.0f;
   constexpr std::array<float, 4> FadeBezier = { 0.2f, 0.8f, 0.2f, 1.0f };
   constexpr std::array<unsigned, 4> WavePeriodsMs = { 820, 640, 1040, 760 };
   constexpr std::array<int, 4> WavePhaseMs = { -120, -380, -60, -520 }; // CSS animation-delay.
   constexpr float WaveMinimumScale = 0.28f; // 16 DIP * 0.28 = 4.48 DIP, user-approved.
+  constexpr float ReducedMotionWaveHeight = 10.0f; // Static bars, DIP, centered on y = 17.
   // CSS Easing Functions Level 1: ease-in-out is this cubic, not a new design curve.
   constexpr std::array<float, 4> WaveBezier = { 0.42f, 0.0f, 0.58f, 1.0f };
   // Each half-cycle uses WaveBezier; negative delay starts partway into the cycle.
@@ -297,6 +328,30 @@ namespace Spring {
   constexpr SpringParams CompactToIdle { 341.5f, 35.11f, 1.0f }; // response 0.34s, damping ratio 0.95
   constexpr SpringParams ToHud { 438.6f, 28.48f, 1.0f }; // response 0.3s, damping ratio 0.68
   constexpr SpringParams FromHud { 273.4f, 29.10f, 1.0f }; // response 0.38s, damping ratio 0.88
+  constexpr SpringParams HoverSwell { 503.6f, 27.83f, 1.0f }; // response 0.28s, damping ratio 0.62
+}
+
+// Defaults for %APPDATA%\NotchIsland\config.json. Used per field when the file,
+// the field, or its value is missing or invalid.
+enum class TitleFont { Serif, Sans };
+struct UserConfig {
+  int          version;
+  TitleFont    titleFont;
+  D2D1_COLOR_F accentColor;   // replaces Sky; see AccentStart()
+  unsigned     hoverDelayMs;  // clamped to [0, 1000]
+  int          monitorIndex;  // 0 = primary; 1..n = others sorted by left edge
+};
+constexpr UserConfig kDefaultConfig { 1, TitleFont::Serif, Color::Sky, 150u, 0 };
+
+// Gradient start for the accent. The default accent keeps the designed Aqua -> Sky pair;
+// a custom accent mixes 35% white into itself.
+inline D2D1_COLOR_F AccentStart(const D2D1_COLOR_F& accent) {
+  const bool isDefault = std::fabs(accent.r - Color::Sky.r) < 0.002f &&
+                         std::fabs(accent.g - Color::Sky.g) < 0.002f &&
+                         std::fabs(accent.b - Color::Sky.b) < 0.002f;
+  if (isDefault) return Color::Aqua;
+  return { accent.r + (1.0f - accent.r) * 0.35f, accent.g + (1.0f - accent.g) * 0.35f,
+           accent.b + (1.0f - accent.b) * 0.35f, 1.0f };
 }
 
 struct SpringValue { float x, v, target; };

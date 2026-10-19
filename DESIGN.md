@@ -4,6 +4,17 @@ Design system dan spesifikasi visual untuk Notch Island: overlay Windows ala mac
 
 Prototipe interaktif (referensi visual): artifact **Notch Island** di claude.ai. Semua tabel di bawah dihasilkan dari spec yang sama dengan prototipe.
 
+**Versi 0.2** · Target: **Windows 11 x64 saja** (build 22000+). Tidak ada fallback Windows 10.
+
+### Keputusan yang dikunci (v0.2)
+
+| # | Keputusan |
+|---|---|
+| D1 | Hover **dan** klik didukung. Hover memicu Hover Swell seketika lalu Expanded setelah 150 ms. Klik kiri di Dormant/Compact langsung membuka Expanded dan mem-*pin*-nya. Klik tengah di Compact = play/pause global. |
+| D2 | Saat media di-pause, Compact bertahan **30 detik**: bar membeku jadi titik 3 DIP, mini art 50% opacity. Lewat 30 detik, atau aplikasi media ditutup, kembali ke Dormant. |
+| D3 | Konfigurasi pengguna di `%APPDATA%\NotchIsland\config.json` (via `SHGetKnownFolderPath(FOLDERID_RoamingAppData)`), dengan default hardcoded per field. |
+| D4 | Hanya Windows 11 x64. |
+
 ---
 
 ## 1. Prinsip desain
@@ -22,10 +33,9 @@ Prototipe interaktif (referensi visual): artifact **Notch Island** di claude.ai.
 - **Unit: DIP** (device-independent pixel). 1 DIP = 1 px pada 96 dpi (scaling 100%). Pada 150%, 1 DIP = 1.5 px.
 - Panggil `ID2D1DeviceContext::SetDpi(dpi, dpi)` dengan nilai dari `GetDpiForWindow`, lalu pakai semua angka di dokumen ini apa adanya.
 - **Origin lokal** = pojok kiri-atas **body** island. Ear kiri berada di `x ∈ [−e, 0]`, ear kanan di `x ∈ [W, W + e]`.
-- **Anchor window**: window tetap 492 × 193 DIP. Offset X dari tepi kiri monitor adalah `floor((lebarMonitorDip − 492) × 0.5)` DIP; konversi offset ke piksel lalu tambahkan `rcMonitor.left`. Screen Y = `rcMonitor.top`, bukan `rcWork.top`.
-- **Origin body dalam window**: `x = windowCenterX − W × 0.5`, `y = 0` DIP. Contoh screen rect @1920 mengasumsikan monitor 1920 DIP dengan origin (0, 0).
+- **Origin layar island**: `left = floor((lebarMonitorDip − W) / 2)`, `top = 0` (tepi atas monitor, bukan work area, karena island menempel ke bezel).
 - **`D2D1_RECT_F` = `{ left, top, right, bottom }`**, bukan `{ x, y, w, h }`. Semua tabel mencantumkan kedua bentuk.
-- Semua stroke tetap dalam DIP, termasuk lens/debug 1 DIP dan rim 2 DIP yang di-mask sehingga hanya 1 DIP sisi dalam terlihat. Jangan membulatkan setiap tepi geometri ke piksel; konversi/pembulatan piksel hanya untuk penempatan dan ukuran window/swap chain.
+- Setelah dikali DPI, bulatkan tepi rect ke piksel utuh agar rim 1 DIP tetap tajam.
 
 ---
 
@@ -34,11 +44,25 @@ Prototipe interaktif (referensi visual): artifact **Notch Island** di claude.ai.
 | # | State | Kapan tampil |
 |---|---|---|
 | 1 | **Dormant** | Tidak ada aktivitas. Default saat idle. |
-| 2 | **Compact media** | Ada media yang sedang diputar (SMTC session aktif & playing). |
-| 3 | **Expanded dashboard** | Kursor hover di atas island ≥ 120 ms, atau klik. Punya 3 tab: Now Playing, Telemetry, Drop Tray. |
+| 2 | **Compact media** | Sesi SMTC berstatus Playing, **atau** Paused dan masih dalam grace 30 detik (lihat 3.3). |
+| 3 | **Expanded dashboard** | Kursor diam di atas island selama `hoverDelayMs` (default 150 ms), **atau** klik kiri (pinned). Punya 3 tab: Now Playing, Telemetry, Drop Tray. |
 | 4 | **System HUD** | Volume / brightness berubah, atau timer Pomodoro selesai. Tampil 1800 ms lalu kembali ke state sebelumnya. |
 
-Prioritas jika bertabrakan: **HUD > Expanded (hover) > Compact > Dormant**. HUD yang muncul saat Expanded akan menggantikan Expanded, lalu kembali ke Expanded jika kursor masih di atas island.
+Penomoran state tetap **1–4** di seluruh dokumen dan kode (Dormant = 1).
+
+Prioritas jika bertabrakan: **HUD > Expanded (pinned atau hover) > Compact > Dormant**. HUD menggantikan Expanded sementara; status pin **tidak** hilang, jadi setelah HUD selesai island kembali ke Expanded jika masih pinned atau masih di-hover.
+
+### 3.0 Mesin state
+
+```
+base      = Compact jika media Playing atau dalam grace pause, selain itu Dormant
+expanded  = base ∈ {Dormant, Compact} && (pinned || (hovered && hoverDelay lewat && !suppressHover))
+swell     = base ∈ {Dormant, Compact} && hovered && !expanded && !pinned && !suppressHover && !hud
+tampil    = hud ? HUD : expanded ? Expanded : base
+```
+
+- `pinned` di-set oleh klik kiri, di-clear oleh klik kiri berikutnya di area kosong island, mouse-down di luar island, atau aplikasi media ditutup saat base Compact (base berubah jadi Dormant tidak meng-clear pin; hanya penutupan sumber media).
+- `suppressHover` di-set saat unpin lewat klik ketika kursor masih di atas island, di-clear saat kursor keluar. Tanpa ini island langsung membuka lagi 150 ms setelah ditutup.
 
 ### 3.1 Geometri per state
 
@@ -51,7 +75,38 @@ Prioritas jika bertabrakan: **HUD > Expanded (hover) > Compact > Dormant**. HUD 
 
 - **Rim** dan **Shadow** adalah pengali 0–1 untuk token `Specular rim` dan `Drop shadow`.
 - **Surface mix**: 0 = Core, 1 = Obsidian. Hanya Expanded yang bernilai 1.
-- Ukuran window overlay tetap: **492 × 193 DIP** (envelope terbesar 428 × 145 + ruang shadow), di-anchor di tengah atas. Bentuk dianimasikan di dalam window; window **tidak** di-resize per frame.
+- Ukuran window overlay tetap: **492 × 193 DIP** (envelope terbesar 428 × 145 + ruang shadow), di-anchor di tengah atas monitor pilihan (`monitorIndex`). Bentuk dianimasikan di dalam window; window **tidak** di-resize per frame.
+
+### 3.2 Hover Swell
+
+Bukan state tersendiri, melainkan **pengubah** target geometri Dormant/Compact selama kursor di atas island dan Expanded belum terbuka.
+
+| Nilai | Delta | Dormant jadi | Compact jadi |
+|---|--:|---|---|
+| Width | +8 | 168 | 248 |
+| Height | +2 | 30 | 36 |
+| Bottom radius | +1 | 13 | 18 |
+| Ear radius | 0 | 8 | 9 |
+
+- Dimulai seketika saat kursor masuk, memakai pegas `HoverSwell`.
+- Saat `hoverDelayMs` lewat, pegas `ToExpanded` mengambil alih dari posisi & velocity swell saat itu.
+- Jika kursor keluar sebelum delay lewat, kembali dengan pegas `HoverSwell`.
+- Konten tidak berubah; body tumbuh simetris dari tengah dan layer konten digeser `+dw / 2` (= 4 DIP) agar tetap di tengah. Lihat 5.1.
+- Tidak ada swell di HUD, di Expanded, saat pinned, atau saat `suppressHover`.
+
+### 3.3 Compact saat pause
+
+| Hal | Playing | Paused (grace) |
+|---|---|---|
+| Wave bar | 4 bar animasi, h 4.48–16 | Membeku jadi titik **3 × 3 DIP**, r 1.5, pusat y = 17 (rect di Bagian 5) |
+| Mini album art | opacity 1.0 | opacity **0.5** |
+| Transisi | — | 200 ms ease (`PausedMorphMs`), dua arah |
+| Status dot (Dormant) | opacity 0.85 | opacity 0.35 |
+
+- Grace **30 000 ms** (`PauseGraceMs`) dihitung sejak event pause terakhir. Resume dalam grace membatalkan timer.
+- Setelah grace habis: morph ke Dormant dengan pegas `CompactToIdle`.
+- **Aplikasi media ditutup** (sesi SMTC hilang / `SessionsChanged` tanpa sesi aktif): langsung ke Dormant tanpa grace, dan pin di-clear.
+- Resume dari Dormant (grace sudah lewat): Dormant → Compact dengan pegas `IdleToCompact`.
 
 ---
 
@@ -101,16 +156,8 @@ Screen X @1920 = local X + 880.
 | Island body | 0 | 0 | 160 | 28 | 12 | `{0, 0, 160, 28}` | Core | Bottom corners: continuous curve, see geometry recipe |
 | Left ear (concave) | -8 | 0 | 8 | 8 | 8 | `{-8, 0, 0, 8}` | Core | Arc center (−e, e) |
 | Right ear (concave) | 160 | 0 | 8 | 8 | 8 | `{160, 0, 168, 8}` | Core | Arc center (W + e, e) |
-| Camera lens | 76 | 10 | 8 | 8 | 4 | `{76, 10, 84, 18}` | Camera lens | 1 DIP stroke in Lens ring |
-| Status dot | 138 | 11 | 6 | 6 | 3 | `{138, 11, 144, 17}` | Aqua | Opacity aktif 0.85, idle 0.35; sky glow hanya saat aktif |
-
-### Debug HUD — `namespace DebugHud`
-
-- `FpsRect = {8, 6, 64, 17}` dalam koordinat body (56 × 11 DIP).
-- Micro label: Segoe UI Variable Small, 9.5 DIP, weight 600, line height 11 DIP, tracking +0.6 DIP, kapital, **tabular figures**, rata kiri (LTR), paragraph top, tanpa wrap.
-- FPS aktif memakai `Color::Aqua` dengan alpha dikali 0.75. Saat render loop berhenti, tampil `IDLE` dengan `Color::Label3` langsung (alpha 0.30, **bukan** dikali 0.30 lagi).
-- `showDebugFps = false` default; toggle `Ctrl+Shift+F`. Tidak ada timer render hanya untuk menghitung FPS; label idle tidak membuat renderer terus berjalan.
-- Bounding debug default mati dan toggle terpisah `Ctrl+Alt+F12`: stroke 1 DIP Aqua untuk semua rect elemen M0, termasuk `Idle::Body`, `Idle::LeftEar`, `Idle::RightEar`, lens/status dan `DebugHud::FpsRect`. Rect body/ear diturunkan dari `kGeomIdle`, bukan outline alternatif.
+| Camera lens | 76 | 10 | 8 | 8 | 4 | `{76, 10, 84, 18}` | Camera lens | 1px stroke in Lens ring |
+| Status dot | 138 | 11 | 6 | 6 | 3 | `{138, 11, 144, 17}` | Aqua | Opacity 0.85, sky glow |
 
 ### Compact media — `namespace Compact`
 
@@ -123,10 +170,14 @@ Screen X @1920 = local X + 840.
 | Right ear (concave) | 240 | 0 | 9 | 9 | 9 | `{240, 0, 249, 9}` | Core | Arc center (W + e, e) |
 | Album art | 10 | 6 | 22 | 22 | 6 | `{10, 6, 32, 28}` | Label primary | Bitmap brush clipped to rounded rect |
 | Waveform group | 209 | 9 | 21 | 16 | — | `{209, 9, 230, 25}` | Sky | Envelope of the 4 bars |
-| Wave bar 1 | 209 | 9 | 3 | 16 | 1.5 | `{209, 9, 212, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 2 | 215 | 9 | 3 | 16 | 1.5 | `{215, 9, 218, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 3 | 221 | 9 | 3 | 16 | 1.5 | `{221, 9, 224, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
-| Wave bar 4 | 227 | 9 | 3 | 16 | 1.5 | `{227, 9, 230, 25}` | Sky | Height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 1 | 209 | 9 | 3 | 16 | 1.5 | `{209, 9, 212, 25}` | Sky | Playing: height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 2 | 215 | 9 | 3 | 16 | 1.5 | `{215, 9, 218, 25}` | Sky | Playing: height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 3 | 221 | 9 | 3 | 16 | 1.5 | `{221, 9, 224, 25}` | Sky | Playing: height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Wave bar 4 | 227 | 9 | 3 | 16 | 1.5 | `{227, 9, 230, 25}` | Sky | Playing: height 4.48–16, centered on y = 17. Aqua → Sky gradient |
+| Paused dot 1 | 209 | 15.5 | 3 | 3 | 1.5 | `{209, 15.5, 212, 18.5}` | Sky | Paused: bar frozen to a 3 × 3 dot, same center |
+| Paused dot 2 | 215 | 15.5 | 3 | 3 | 1.5 | `{215, 15.5, 218, 18.5}` | Sky | Paused: bar frozen to a 3 × 3 dot, same center |
+| Paused dot 3 | 221 | 15.5 | 3 | 3 | 1.5 | `{221, 15.5, 224, 18.5}` | Sky | Paused: bar frozen to a 3 × 3 dot, same center |
+| Paused dot 4 | 227 | 15.5 | 3 | 3 | 1.5 | `{227, 15.5, 230, 18.5}` | Sky | Paused: bar frozen to a 3 × 3 dot, same center |
 
 ### Expanded · Now Playing — `namespace ExpandedNowPlaying`
 
@@ -206,7 +257,7 @@ Screen X @1920 = local X + 760.
 | Tab · Telemetry | 100 | 12 | 84 | 22 | — | `{100, 12, 184, 34}` | Label primary | Label centered, 11/600 |
 | Tab · Drop Tray | 184 | 12 | 84 | 22 | — | `{184, 12, 268, 34}` | Label primary | Label centered, 11/600 |
 | Clock | 304 | 12 | 80 | 22 | — | `{304, 12, 384, 34}` | Label secondary | Right-aligned, 11/600 tabular |
-| Drop zone | 16 | 46 | 368 | 88 | 16 | `{16, 46, 384, 134}` | Control fill | Dashed 1 DIP Label tertiary, dash 4 / gap 3 |
+| Drop zone | 16 | 46 | 368 | 88 | 16 | `{16, 46, 384, 134}` | Control fill | Dashed 1px Label tertiary, dash 4 / gap 3 |
 | File tile 1 | 29 | 58 | 106 | 64 | 10 | `{29, 58, 135, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
 | File tile 2 | 147 | 58 | 106 | 64 | 10 | `{147, 58, 253, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
 | File tile 3 | 265 | 58 | 106 | 64 | 10 | `{265, 58, 371, 122}` | Control fill | Icon 20 at (12, 12) · name 11/600 at (12, 40) |
@@ -245,7 +296,8 @@ Screen X @1920 = local X + 860.
 | Active tab pill | `x = 18 + 84 × tabIndex`. Animasi geser memakai pegas `ToExpanded`. |
 | Scrub fill | `width = 176 × progress` |
 | Scrub knob | pusat `(92 + 176 × progress, 90)`, ukuran 10 × 10 |
-| Wave bar i | `x = 209 + 6i`, `w = 3`, `h ∈ [4.48, 16]`, pusat vertikal `y = 17` |
+| Wave bar i | `x = 209 + 6i`, `w = 3`, `h ∈ [4.48, 16]` saat playing, `h = 3` saat paused, pusat vertikal `y = 17` |
+| Origin layer konten | `x = (W_saat_ini − W_target) / 2`. Konten selalu di tengah body selama animasi dan swell (swell: +4 DIP). Semua rect Bagian 5 relatif ke origin ini. |
 | Level fill (HUD) | `width = 112 × level` |
 | Telemetry bar | `width = 368 × value` (tab Telemetry), `88 × value` (GPU pill) |
 | Ring | stroke 3.5 (telemetri) atau 2.5 (Pomodoro), radius `(w − stroke) / 2`, mulai jam 12, searah jarum jam, cap round |
@@ -260,10 +312,10 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 |---|---|--:|---|---|---|
 | Core (`Color::Core`) | `#000000` | 1.00 | `rgba(0, 0, 0, 1)` | `{ 0.000f, 0.000f, 0.000f, 1.000f }` | Surface for Dormant, Compact and HUD. Matches the bezel. |
 | Obsidian (`Color::Obsidian`) | `#0C0C0E` | 0.92 | `rgba(12, 12, 14, 0.92)` | `{ 0.047f, 0.047f, 0.055f, 0.920f }` | Surface for Expanded. Interpolated from Core by the "mix" spring. |
-| Specular rim (`Color::Rim`) | `#FFFFFF` | 0.12 | `rgba(255, 255, 255, 0.12)` | `{ 1.000f, 1.000f, 1.000f, 0.120f }` | 1 DIP inner border. Alpha 0.12 at y = 0 fading to 0.04 at y = H. Scaled by the "rim" spring. |
+| Specular rim (`Color::Rim`) | `#FFFFFF` | 0.12 | `rgba(255, 255, 255, 0.12)` | `{ 1.000f, 1.000f, 1.000f, 0.120f }` | 1px inner border. Alpha 0.12 at y = 0 fading to 0.04 at y = H. Scaled by the "rim" spring. |
 | Aqua (`Color::Aqua`) | `#00FFFF` | 1.00 | `rgba(0, 255, 255, 1)` | `{ 0.000f, 1.000f, 1.000f, 1.000f }` | Accent gradient start (top of bars, status dot). |
 | Sky (`Color::Sky`) | `#38BDF8` | 1.00 | `rgba(56, 189, 248, 1)` | `{ 0.220f, 0.741f, 0.973f, 1.000f }` | Primary accent: progress fills, rings, gradient end. |
-| Sky glow (`Color::Glow`) | `#38BDF8` | 0.45 | `rgba(56, 189, 248, 0.45)` | `{ 0.220f, 0.741f, 0.973f, 0.450f }` | Glow behind accent marks. Gaussian blur σ = 3 DIP. |
+| Sky glow (`Color::Glow`) | `#38BDF8` | 0.45 | `rgba(56, 189, 248, 0.45)` | `{ 0.220f, 0.741f, 0.973f, 0.450f }` | Glow behind accent marks. Gaussian blur σ ≈ 3 DIP. |
 | Label primary (`Color::Label`) | `#F5F5F7` | 1.00 | `rgba(245, 245, 247, 1)` | `{ 0.961f, 0.961f, 0.969f, 1.000f }` | Titles, values, glyphs. |
 | Label secondary (`Color::Label2`) | `#EBEBF5` | 0.60 | `rgba(235, 235, 245, 0.6)` | `{ 0.922f, 0.922f, 0.961f, 0.600f }` | Artist, clock, secondary values. |
 | Label tertiary (`Color::Label3`) | `#EBEBF5` | 0.30 | `rgba(235, 235, 245, 0.3)` | `{ 0.922f, 0.922f, 0.961f, 0.300f }` | Micro labels, timestamps, dashed tray stroke. |
@@ -271,13 +323,17 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 | Selected pill (`Color::Pill`) | `#FFFFFF` | 0.16 | `rgba(255, 255, 255, 0.16)` | `{ 1.000f, 1.000f, 1.000f, 0.160f }` | Active tab pill, pressed button. |
 | Track (`Color::Track`) | `#FFFFFF` | 0.14 | `rgba(255, 255, 255, 0.14)` | `{ 1.000f, 1.000f, 1.000f, 0.140f }` | Progress and ring tracks. |
 | Camera lens (`Color::Lens`) | `#0A0A12` | 1.00 | `rgba(10, 10, 18, 1)` | `{ 0.039f, 0.039f, 0.071f, 1.000f }` | Dormant camera glyph fill. |
-| Lens ring (`Color::LensRing`) | `#1C1C26` | 1.00 | `rgba(28, 28, 38, 1)` | `{ 0.110f, 0.110f, 0.149f, 1.000f }` | Dormant camera glyph 1 DIP stroke. |
+| Lens ring (`Color::LensRing`) | `#1C1C26` | 1.00 | `rgba(28, 28, 38, 1)` | `{ 0.110f, 0.110f, 0.149f, 1.000f }` | Dormant camera glyph 1px stroke. |
 | Focus orange (`Color::Focus`) | `#FF9F0A` | 1.00 | `rgba(255, 159, 10, 1)` | `{ 1.000f, 0.624f, 0.039f, 1.000f }` | Pomodoro ring and time. |
 | Drop shadow (`Color::Shadow`) | `#000000` | 0.55 | `rgba(0, 0, 0, 0.55)` | `{ 0.000f, 0.000f, 0.000f, 0.550f }` | Offset (0, 12), blur 32. Scaled by the "shadow" spring. |
 
 - Gradien aksen: **Aqua → Sky** (horizontal untuk bar progres, vertikal atas→bawah untuk wave bar).
-- Glow: drop shadow warna `Sky glow`, blur 3 DIP (σ), offset (0, 0). Hanya pada elemen aksen yang aktif.
-- Clear swap chain: `Color::Transparent = {0, 0, 0, 0}`. Semua alpha brush adalah straight alpha.
+- Glow: drop shadow warna `Sky glow`, blur ≈ 3 DIP (σ), offset 0. Hanya pada elemen aksen yang aktif.
+- **Aksen dari config.** `accentColor` menggantikan **Sky**. Ujung awal gradien:
+  - jika `accentColor` = default `#38BDF8` → tetap **Aqua `#00FFFF`** (pasangan desain asli),
+  - selain itu → `accent + (1 − accent) × 0.35` per kanal (dicampur 35% putih). Lihat `AccentStart()`.
+  - Glow = `accentColor` dengan alpha 0.45.
+  - Focus orange, label, surface, dan rim **tidak** ikut berubah.
 - Kontras: semua teks Label primary/secondary di atas Core/Obsidian lolos WCAG AA. Label tertiary hanya untuk label mikro dan timestamp, bukan informasi penting.
 
 ---
@@ -287,22 +343,19 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 | Role | macOS | Windows (DirectWrite) | Size | Weight | Line | Tracking | Color |
 |---|---|---|--:|--:|--:|---|---|
 | Tab label / clock | SF Pro Text | Segoe UI Variable Text | 11 | 600 | 14 | +0.1 | Label primary |
-| Media title | New York | Georgia | 15 | 600 | 18 | -0.2 | Label primary |
+| Media title | New York | Georgia (titleFont serif) · Segoe UI Variable Display (sans) | 15 | 600 | 18 | -0.2 | Label primary |
 | Artist | SF Pro Text | Segoe UI Variable Text | 12 | 500 | 14 | 0 | Label secondary |
 | Timestamp | SF Pro Text | Segoe UI Variable Text | 10 | 500 | 11 | 0 · tabular | Label tertiary |
 | Telemetry value | SF Pro Display | Segoe UI Variable Display | 11 | 600 | 12 | 0 · tabular | Label primary |
 | Micro label | SF Pro Text | Segoe UI Variable Small | 9.5 | 600 | 11 | +0.6 · caps | Label tertiary |
 | HUD value | SF Pro Display | Segoe UI Variable Display | 13 | 600 | 16 | 0 · tabular | Label primary |
 
-- **Jangan bundle SF Pro atau New York.** Lisensinya hanya untuk platform Apple. Default Windows: **Segoe UI Variable** (bawaan Windows 11). Fallback Windows 10: Segoe UI. Opsional: bundle **Inter** (OFL) dan muat lewat `IDWriteFactory5::CreateInMemoryFontFileLoader`.
-- Serif aksen (judul lagu): **Georgia**.
+- **Jangan bundle SF Pro atau New York.** Lisensinya hanya untuk platform Apple. Font UI: **Segoe UI Variable** (selalu ada di Windows 11, tidak perlu fallback). Opsional: bundle **Inter** (OFL) dan muat lewat `IDWriteFactory5::CreateInMemoryFontFileLoader`.
+- Judul lagu mengikuti `titleFont` di config: `"serif"` (default) → **Georgia** 15/600; `"sans"` → **Segoe UI Variable Display** 15/600. Ukuran, line height, dan rect sama.
 - Angka yang berubah (jam, persentase, waktu) wajib **tabular figures**: `DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES`.
 - Antialias teks: `D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE`. ClearType tidak bekerja di permukaan transparan.
 - Teks yang terlalu panjang: trimming `DWRITE_TRIMMING_GRANULARITY_CHARACTER` dengan ellipsis sign.
-- Tracking dalam tabel adalah DIP (letter-spacing). Pakai `IDWriteTextLayout1::SetCharacterSpacing`, separuh tracking di leading dan separuh di trailing; minimum advance 0.
-- Semua role dibuat melalui DirectWrite dan diperiksa terhadap system font collection. Jika family pilihan (termasuk Georgia) tidak tersedia, gunakan Segoe UI yang juga diperiksa; kegagalan HRESULT atau ketiadaan fallback dilaporkan, bukan diabaikan.
-- Line height memakai uniform line spacing sesuai tabel. Baseline berasal dari font yang benar-benar dipilih: `ascentDip + (lineHeight − ascentDip − descentDip) × 0.5`, dengan ascent/descent diskalakan dari `designUnitsPerEm`; tidak ada baseline tebakan atau tambahan line gap.
-- Konstanta typography mencakup seluruh tabel (family, size, weight, lineHeight, tracking, tabular, capitals, color). Role tab/clock mengaktifkan tabular untuk jam; DebugHud mengoverride micro label menjadi tabular. Locale layout `en-US`, reading direction LTR.
+- Tracking dalam tabel adalah DIP (letter-spacing). DirectWrite tidak punya tracking langsung: pakai `IDWriteTextLayout1::SetCharacterSpacing`.
 
 ---
 
@@ -318,6 +371,7 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 | Compact → Dormant | `CompactToIdle` | 341.5 | 35.11 | 1.0 | 0.34 s | 0.95 | 0.0% | 355 ms |
 | Any → HUD | `ToHud` | 438.6 | 28.48 | 1.0 | 0.3 s | 0.68 | 5.2% | 327 ms |
 | HUD → previous state | `FromHud` | 273.4 | 29.10 | 1.0 | 0.38 s | 0.88 | 0.2% | 313 ms |
+| Hover swell in / out | `HoverSwell` | 503.6 | 27.83 | 1.0 | 0.28 s | 0.62 | 8.1% | 392 ms |
 
 - Rumus: `k = (2π / response)² × m`, `c = 4π × ζ × m / response`, `m = 1`.
 - **Settle** = waktu terakhir nilai menyimpang > 0.5% dari target.
@@ -326,88 +380,102 @@ Alpha di bawah adalah **straight alpha**. Jika render ke swap chain `DXGI_ALPHA_
 - Transisi yang terputus di tengah (mis. hover lalu cepat keluar) **meneruskan velocity** saat ini ke target baru. Jangan reset ke 0.
 - Animasi berhenti saat semua nilai `|x − target| < 0.01` dan `|v| < 0.01`. Setelah itu stop render loop (hemat CPU/GPU).
 
-### 8.2 Timing lain
+### 8.2 Timing
 
-| Hal | Nilai |
+| `Timing::` | ms | Aturan |
+|---|--:|---|
+| `HoverDelayMsDefault` | 150 | Hover → Expanded. Swell starts at 0 ms. Overridable by config hoverDelayMs (0–1000). |
+| `CollapseDelayMs` | 250 | Cursor leaves an unpinned Expanded → collapse. Re-entering within this window cancels it. |
+| `HudVisibleMs` | 1800 | Since the last HUD event. New events reset it. |
+| `PauseGraceMs` | 30000 | Compact stays visible while paused, then morphs to Dormant. Closing the media app skips the wait. |
+| `PausedMorphMs` | 200 | Bars → 3 DIP dots, mini art → 50% opacity (and back on resume). |
+| `ContentFadeInMs` | 240 | Opacity 0 → 1, blur 3 → 0 DIP, cubic-bezier(0.2, 0.8, 0.2, 1). |
+| `ContentFadeDelayMs` | 70 | Before content fade-in starts. |
+| `ContentFadeOutMs` | 120 | Linear, starts with the spring. |
+| `TelemetryPollMs` | 1000 | Only while a telemetry view is visible. |
+
+| Hal lain | Nilai |
 |---|---|
-| Delay hover → Expanded | 120 ms |
-| Delay keluar → collapse | 250 ms (mencegah flicker saat kursor menyerempet tepi) |
-| HUD tampil | 1800 ms sejak event terakhir. Event baru me-reset timer. |
-| Fade-in konten | 240 ms, delay 70 ms, cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0→1 + blur 3→0 DIP |
-| Fade-out konten | 120 ms linear, mulai bersamaan dengan pegas |
-| Wave bar | durasi siklus 820 / 640 / 1040 / 760 ms, scaleY 0.28 ↔ 1.0, ease-in-out. Berhenti di 0.28 saat pause. |
+| Wave bar | Siklus 820 / 640 / 1040 / 760 ms, tinggi 4.48 ↔ 16 DIP (scale 0.28 ↔ 1.0, `Motion::WaveMinimumScale`), ease-in-out |
 | Tekan tombol media | scale 0.88 + fill `Selected pill`, 120 ms |
-| Update telemetri | tiap 1000 ms, perubahan nilai dianimasikan 500 ms ease-out |
+| Perubahan nilai telemetri | dianimasikan 500 ms ease-out |
 
 ### 8.3 Reduced motion
 
-Jika `SPI_GETCLIENTAREAANIMATION` = FALSE: lompati pegas (snap ke target), matikan wave bar animasi (tampilkan bar statis), fade jadi 100 ms tanpa blur.
+Jika `SPI_GETCLIENTAREAANIMATION` = FALSE: lompati pegas (snap ke target), tidak ada Hover Swell, wave bar statis (tinggi 10 DIP, `Motion::ReducedMotionWaveHeight`, pusat y = 17), fade jadi 100 ms tanpa blur (`Motion::ReducedFadeMs`). Logika delay hover, pin, dan grace tetap sama.
 
 ---
 
 ## 9. Interaksi
 
-| Input | Perilaku |
-|---|---|
-| Hover di island (Dormant/Compact) | Setelah 120 ms → Expanded, tab terakhir dipakai. |
-| Kursor keluar dari Expanded | Setelah 250 ms → kembali ke state dasar. |
-| Klik tab | Pindah tab, pill bergeser. |
-| Klik Prev / Play-Pause / Next | Kirim ke SMTC session aktif. |
-| Drag di scrub | Pointer capture, seek saat dilepas (preview posisi saat drag). |
-| Drag file ke island | Expanded langsung terbuka di tab Drop Tray. |
-| Klik di luar bentuk island | Tembus ke aplikasi di bawah (`HTTRANSPARENT`). |
-| Aplikasi fullscreen di foreground | Island disembunyikan (kecuali HUD). |
+| Input / event | Saat | Hasil |
+|---|---|---|
+| Kursor masuk | Dormant, Compact | Hover Swell seketika. Setelah `hoverDelayMs` → Expanded (tab terakhir). |
+| Kursor keluar | Expanded tidak pinned | Collapse ke base setelah 250 ms. Masuk lagi dalam 250 ms membatalkannya. |
+| Kursor keluar | Expanded pinned | Tidak terjadi apa-apa. |
+| Klik kiri | Dormant, Compact | Lewati delay, langsung Expanded **dan pinned**. |
+| Klik kiri di area kosong | Expanded (hover) | Pin. |
+| Klik kiri di area kosong | Expanded (pinned) | Unpin, collapse seketika, set `suppressHover`. |
+| Klik kiri di kontrol (tab, tombol, scrub, tile) | Expanded | Kontrol bekerja. Status pin tidak berubah. |
+| Mouse down di luar island | Pinned | Unpin dan collapse. Klik tetap diteruskan ke aplikasi di bawah. |
+| Klik tengah | Compact | Play/pause global (SMTC `TryTogglePlayPauseAsync`). Tidak expand, tidak mengubah swell. |
+| Klik tengah | State lain | Diabaikan. |
+| Klik kanan | Semua | Diabaikan di v1 (cadangan untuk menu konteks). |
+| Klik tab | Expanded | Pindah tab, pill bergeser. |
+| Klik Prev / Play-Pause / Next | Expanded | Kirim ke sesi SMTC aktif. |
+| Drag di scrub | Expanded | Pointer capture, seek saat dilepas. |
+| Drag file ke island | Semua kecuali HUD | Expanded terbuka di tab Drop Tray dan pinned selama drag. |
+| Klik di luar bentuk island | Tidak pinned | Tembus ke aplikasi di bawah (`HTTRANSPARENT`). |
+| Aplikasi fullscreen di foreground | Semua | Island disembunyikan (kecuali HUD), pin di-clear. |
 
-Area hit-test = geometri island saat ini (`ID2D1Geometry::FillContainsPoint`), bukan bounding box window.
+- Area hit-test = geometri island saat ini (`ID2D1Geometry::FillContainsPoint`), bukan bounding box window.
+- "Area kosong" = titik di dalam geometri yang tidak berada di rect kontrol mana pun di Bagian 5.
+- Deteksi klik di luar island: karena window `WS_EX_NOACTIVATE` tidak menerima klik di luar bentuknya, pasang `WH_MOUSE_LL` **hanya selama pinned** dan lepas saat unpin. Hook tidak boleh memblok event (selalu `CallNextHookEx`).
 
 ---
 
-## 10. Checklist verifikasi visual
+## 10. Konfigurasi pengguna
 
+Lokasi: `%APPDATA%\NotchIsland\config.json`, path dari `SHGetKnownFolderPath(FOLDERID_RoamingAppData)`.
+
+```json
+{
+  "version": 1,
+  "titleFont": "serif",
+  "accentColor": "#38BDF8",
+  "hoverDelayMs": 150,
+  "monitorIndex": 0
+}
+```
+
+| Field | Tipe | Default | Valid | Jika tidak valid |
+|---|---|---|---|---|
+| `version` | int | 1 | 1 | Anggap 1 |
+| `titleFont` | string | `"serif"` | `"serif"`, `"sans"` | `"serif"` |
+| `accentColor` | string | `"#38BDF8"` | `#RRGGBB` | `"#38BDF8"` |
+| `hoverDelayMs` | int | 150 | 0–1000 | Clamp ke rentang; non-angka → 150 |
+| `monitorIndex` | int | 0 | 0 = primary, 1..n = monitor lain diurutkan dari tepi kiri | Di luar rentang → 0 |
+
+- File tidak ada → pakai default dan tulis file dengan default sekali (buat folder jika perlu).
+- JSON rusak → pakai semua default, **jangan** menimpa file pengguna; catat warning ke log.
+- Field tidak valid → hanya field itu yang memakai default.
+- Field tidak dikenal → diabaikan dan dibiarkan di file.
+- Dimuat saat start dan saat "Reload config" di menu tray. Tidak ada hot-reload otomatis di v1.
+- Default dikunci di `kDefaultConfig` (Lampiran A).
+
+---
+
+## 11. Checklist verifikasi visual
+
+- [ ] Hover Swell terlihat dalam frame pertama setelah kursor masuk; Expanded mulai tepat setelah `hoverDelayMs`.
+- [ ] Klik kiri di Dormant langsung membuka Expanded tanpa menunggu delay, dan tetap terbuka saat kursor keluar.
+- [ ] Klik tengah di Compact mem-pause musik tanpa membuka island.
+- [ ] Saat pause: titik 3 DIP dan art 50% muncul dalam 200 ms; island kembali ke Dormant tepat 30 detik kemudian.
 - [ ] Pada 100% dan 150% scaling, screenshot island cocok dengan prototipe (overlay di atas screenshot prototipe zoom 1×/1.5×, selisih ≤ 1 px).
-- [ ] Debug overlay (toggle `Ctrl+Alt+F12`) menggambar rect elemen yang diimplementasikan di Bagian 5 dengan stroke 1 DIP Aqua. FPS/IDLE ditoggle terpisah dengan `Ctrl+Shift+F` dan default mati.
+- [ ] Debug overlay (toggle `Ctrl+Alt+F12`) menggambar semua rect di Bagian 5 dengan stroke 1 DIP Aqua, dan semua elemen jatuh tepat di dalamnya. FPS/IDLE ditoggle terpisah dengan `Ctrl+Shift+F`; keduanya default mati (Lampiran B).
 - [ ] Dormant tidak punya rim, tidak punya shadow, dan tidak terlihat garis di tepi atas layar.
 - [ ] Saat overshoot `ToHud` (5.2%), sudut bawah tidak menembus ear.
 - [ ] Angka jam/persentase tidak "bergoyang" lebarnya (tabular figures aktif).
-
----
-
-## 11. Keputusan final M0
-
-- DESIGN dan Lampiran A adalah sumber angka untuk M0; header harus identik dengan blok kode Lampiran A. `BuildIslandGeometry`, parameter state, serta nilai/integrator pegas asli tidak berubah.
-- Window tetap 492 × 193 DIP, top lokal 0, half 0.5, DPI dasar 96 (`WindowSpec`). Body terpusat di dalam window; window terpusat terhadap `rcMonitor`, tidak terhadap work area.
-- `PaintSpec` menamai zero/unit untuk konversi semantik, lens/debug stroke 1 DIP, rim stroke 2 DIP di-mask ke sisi dalam, rim bottom alpha 0.04, glow sigma 3 DIP / offset (0, 0), shadow offset (0, 12) / blur 32 DIP, dan opacity dot aktif/idle 0.85/0.35. Nilai ini tidak diperlakukan sebagai piksel fisik.
-- Dormant M0: Core hitam, lens dengan ring, status dot idle 0.35 tanpa glow, tanpa rim/shadow. M0 memakai elemen DESIGN saja; highlight lensa dekoratif dari HTML tidak diimpor. Izin memakai HTML tidak menambah dekorasi yang tidak tercantum dalam keputusan ini.
-- Debug bounds dan FPS adalah dua toggle independen dan default mati; detail layout/warna ada pada Bagian 5. Tidak ada angka FPS palsu saat renderer berhenti: tampil `IDLE` ketika debug FPS diaktifkan.
-- DirectWrite memakai WRL `ComPtr`, tanpa dependency C++/WinRT untuk teks. Painter memilih grayscale antialias dan warna; `TextStyles::IdleLayout()` menghasilkan layout lokal sebesar `FpsRect`, digambar pada origin rect tersebut.
-
----
-
-## 12. Keputusan final M1 — 2026-10-19
-
-- **M0 diterima pengguna pada 2026-10-19.** Ini mencatat penerimaan pengguna, bukan klaim bahwa seluruh target performa atau pengujian MSVC sudah diukur.
-- `Motion` menamai angka Bagian 8: fixed step `1/240` detik, maksimum delta frame `1/20` detik, konversi `1000` ms/detik, hover masuk/keluar `120/250` ms, HUD `1800` ms, fade-in/delay/fade-out `240/70/120` ms, blur konten `3` DIP, dan fade cubic `(0.2, 0.8, 0.2, 1)`. Fade-out tetap linear. Parameter pegas, `StepSpring`, `IsSettled`, dan `BuildIslandGeometry` tidak diubah.
-- **Keputusan waveform pengguna: minimum 4.48 DIP, bukan 4 DIP.** Tinggi penuh tetap 16 DIP dan minimum scale tetap `0.28`; `16 × 0.28 = 4.48`. Semua catatan layout native mengikuti 4.48–16 DIP. HTML asli dipertahankan sebagai referensi historis; catatan tinggi lamanya bukan keputusan native terbaru.
-- Siklus waveform `820/640/1040/760` ms berasal dari `IslandContent` HTML; fase `-120/-380/-60/-520` ms adalah nilai `animationDelay` HTML, bertipe signed. Fase waktu efektif adalah waktu berjalan dikurangi delay negatif, modulo periode. Keyframe minimum di awal/akhir siklus dan maksimum di tengah; masing-masing setengah siklus memakai `Motion::WaveBezier`.
-- `Motion::WaveBezier = (0.42, 0, 0.58, 1)` adalah terjemahan normatif keyword CSS `ease-in-out`, **bukan kurva desain baru**. Rujukan: *CSS Easing Functions Level 1*, bagian cubic Bézier easing functions (`https://www.w3.org/TR/css-easing-1/#cubic-bezier-easing-functions`). Referensi dicatat tanpa akses jaringan. Saat pause, aturan native Bagian 8 tetap minimum scale `0.28`.
-- `ExpandedNowPlaying::TabStride` diturunkan dari `Tab1.left − Tab0.left` (84 DIP). `PaintSpec::RingStroke/PomodoroStroke` = `3.5/2.5` DIP, `DropStroke/DropDash/DropGap` = `1/4/3` DIP, semuanya dari Bagian 5 dan HTML. Dash Direct2D dinyatakan dalam kelipatan stroke; pada stroke 1 DIP nilainya sama. Offset icon/nama tile `(12,12)/(12,40)` dan inset kanan nama 10 DIP berasal dari HTML tile.
-- `Glyph` di Lampiran A menerjemahkan persis SVG `G` HTML: prev/next adalah dua polygon segitiga, play satu polygon, pause dua rounded rect, speaker polygon + dua small arc clockwise, sun lingkaran + ray yang dirotasi, file outline tertutup + fold terbuka. Koordinat dan stroke hanya disimpan di spec (dan salinan Lampiran A), bukan literal dalam renderer. View box prev/next `14 × 12`, play/pause `14 × 14`, speaker/sun/file `20 × 20`; media dipusatkan di button. Keterangan "Glyph 12 DIP" tetap merujuk tinggi skip, tidak mengecilkan SVG menjadi kotak 12 × 12. Tidak ada icon font atau dekorasi baru.
-- `Demo` menyimpan tiga judul/artis/durasi fiktif HTML, track awal 0, elapsed 71 detik, playing true, volume/brightness `64/72`, telemetri CPU/RAM/GPU/NET `34/58/41/22`, RAM total 32 GB (0.32 GB per persen), NET 0.42 MB/s per persen, Pomodoro `18:42` dari total `25:00`, label dan nama file HTML. Ini sample deterministik, bukan data sistem. Artwork boleh placeholder `Color::Label` sesuai PRD R1; gradien prosedural dan warna hue HTML tidak diimpor. Jam HTML berasal dari waktu lokal, bukan angka contoh tetap yang boleh dikarang.
-- Header dan Lampiran A harus identik. Perubahan verifier untuk pengecualian M1 dilakukan terpisah; HTML asli tidak diubah.
-
-- Keputusan pengguna lanjutan: reduced motion memakai fade masuk/keluar masing-masing 100 ms tanpa delay/blur; masuk tetap cubic `(0.2,0.8,0.2,1)`, keluar linear.
-- Demo keyboard memakai raw input tanpa mengambil fokus atau menahan tombol aplikasi foreground, dan hanya berlaku selama kursor berada di geometri island. `1/2/3` memilih Dormant/Compact/Expanded dan membatalkan HUD, `4` mem-pin Volume HUD sampai pilihan state berikutnya; `V/B/P` mengganti HUD menjadi transient 1800 ms dan me-reset deadline. Pemilihan state eksplisit tidak langsung ditimpa hover entry yang masih tertunda.
-
-### 12.1 Perbedaan referensi yang belum diselesaikan oleh tambahan ini
-
-Tambahan M1 ini tidak diam-diam mengganti aturan native yang sudah ada dengan implementasi browser:
-
-- HTML menggeser tab dengan CSS 380 ms cubic `(0.3,1.25,0.4,1)`, sedangkan Bagian 5.1 menentukan pegas `ToExpanded`.
-- HTML membekukan waveform pada fase saat pause; Bagian 8 menentukan berhenti di minimum scale. HTML juga langsung hover tanpa delay, sedangkan native menentukan 120/250 ms.
-- HTML memakai polling telemetri 1400 ms, animasi ring 600 ms dan bar 500 ms cubic `(0.2,0.8,0.2,1)`; Bagian 8 menentukan update 1000 ms dan perubahan 500 ms ease-out. Sample awal diimpor, bukan polling acak HTML.
-- HTML menghapus konten lama langsung dan menonaktifkan fade sepenuhnya pada reduced motion; native menentukan fade-out linear 120 ms dan reduced-motion fade 100 ms tanpa blur. Tidak ada perubahan kebijakan tersebut di sini.
-- HTML punya tambahan highlight/pill/tile inset, knob shadow, variasi glow dan drop-zone fill setengah alpha yang tidak semuanya ada dalam tabel native. Tambahan glyph/sample ini tidak menyetujui dekorasi atau token warna baru tersebut.
-- README dan dokumen status M0 masih menyatakan penerimaan pending; pembaruan status di luar dua file spec ini ditangani sesi utama. Penerimaan pengguna di atas tidak mengarang bukti ukur yang belum tersedia.
 
 ---
 
@@ -436,6 +504,10 @@ constexpr IslandGeom kGeomCompact { 240.0f, 34.0f, 17.0f, 9.0f, 0.0f, 0.5f, 0.25
 constexpr IslandGeom kGeomExpanded { 400.0f, 145.0f, 28.0f, 14.0f, 1.0f, 1.0f, 1.0f };
 constexpr IslandGeom kGeomHud { 200.0f, 44.0f, 22.0f, 10.0f, 0.0f, 0.75f, 0.4f };
 
+// Screen anchor: left = floor((monitorWidthDip - geom.width) / 2), top = monitor top edge (0).
+
+// Restored M0 tokens (DESIGN Lampiran B). The fixed window realizes the screen anchor above:
+// every geom width is even, so window left + (Width - geom.width) / 2 lands on the same DIP.
 namespace WindowSpec {
   constexpr float Width = 492.0f;
   constexpr float Height = 193.0f;
@@ -461,6 +533,27 @@ namespace PaintSpec {
   constexpr float DotOpacityIdle = 0.35f;
 }
 
+// Hover Swell: added to Dormant / Compact targets while hovered and not yet expanded.
+constexpr float kSwellDeltaWidth        = 8.0f;
+constexpr float kSwellDeltaHeight       = 2.0f;
+constexpr float kSwellDeltaBottomRadius = 1.0f;
+
+// Paused Compact
+constexpr float kPausedArtOpacity = 0.5f;
+constexpr float kPausedDotHeight  = 3.0f;
+
+namespace Timing { // milliseconds
+  constexpr unsigned HoverDelayMsDefault = 150;
+  constexpr unsigned CollapseDelayMs = 250;
+  constexpr unsigned HudVisibleMs = 1800;
+  constexpr unsigned PauseGraceMs = 30000;
+  constexpr unsigned PausedMorphMs = 200;
+  constexpr unsigned ContentFadeInMs = 240;
+  constexpr unsigned ContentFadeDelayMs = 70;
+  constexpr unsigned ContentFadeOutMs = 120;
+  constexpr unsigned TelemetryPollMs = 1000;
+}
+
 namespace Idle {
   constexpr D2D1_RECT_F Body = { WindowSpec::Top, WindowSpec::Top, kGeomIdle.width, kGeomIdle.height };
   constexpr D2D1_RECT_F LeftEar = { -kGeomIdle.earRadius, WindowSpec::Top, WindowSpec::Top, kGeomIdle.earRadius };
@@ -470,11 +563,15 @@ namespace Idle {
 }
 namespace Compact {
   constexpr D2D1_ROUNDED_RECT Art = { { 10.0f, 6.0f, 32.0f, 28.0f }, 6.0f, 6.0f }; // Album art
-  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group; bars are 4.48–16 DIP high, centered on y = 17.
+  constexpr D2D1_RECT_F Wave = { 209.0f, 9.0f, 230.0f, 25.0f }; // Waveform group; playing bars are 4.48–16 DIP high, centered on y = 17.
   constexpr D2D1_ROUNDED_RECT Bar0 = { { 209.0f, 9.0f, 212.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 1
   constexpr D2D1_ROUNDED_RECT Bar1 = { { 215.0f, 9.0f, 218.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 2
   constexpr D2D1_ROUNDED_RECT Bar2 = { { 221.0f, 9.0f, 224.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 3
   constexpr D2D1_ROUNDED_RECT Bar3 = { { 227.0f, 9.0f, 230.0f, 25.0f }, 1.5f, 1.5f }; // Wave bar 4
+  constexpr D2D1_ROUNDED_RECT Dot0 = { { 209.0f, 15.5f, 212.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 1
+  constexpr D2D1_ROUNDED_RECT Dot1 = { { 215.0f, 15.5f, 218.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 2
+  constexpr D2D1_ROUNDED_RECT Dot2 = { { 221.0f, 15.5f, 224.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 3
+  constexpr D2D1_ROUNDED_RECT Dot3 = { { 227.0f, 15.5f, 230.0f, 18.5f }, 1.5f, 1.5f }; // Paused dot 4
 }
 namespace ExpandedNowPlaying {
   constexpr D2D1_ROUNDED_RECT TabTrack = { { 16.0f, 12.0f, 268.0f, 34.0f }, 11.0f, 11.0f }; // Tab track
@@ -567,6 +664,7 @@ namespace Color { // straight (non-premultiplied) alpha
   constexpr D2D1_COLOR_F Shadow = { 0.000f, 0.000f, 0.000f, 0.550f }; // #000000 @ 0.55
 }
 
+// Restored M0/M1 tokens below (DESIGN Lampiran B); v0.2 values above win on conflict.
 namespace Typography {
   enum class Role : std::size_t { TabClock, MediaTitle, Artist, Timestamp, TelemetryValue, MicroLabel, HudValue, Count };
   struct Style {
@@ -605,23 +703,24 @@ namespace DebugHud {
   constexpr bool ShowBoundsDefault = false;
 }
 
-// M1 additions: DESIGN sections 5, 8 and 12; original HTML remains unchanged.
 namespace Motion {
   constexpr double FixedStep = 1.0 / 240.0;
   constexpr double MaxFrameDelta = 1.0 / 20.0;
   constexpr double MillisecondsPerSecond = 1000.0;
-  constexpr unsigned HoverEnterMs = 120;
-  constexpr unsigned HoverLeaveMs = 250;
-  constexpr unsigned HudMs = 1800;
-  constexpr unsigned FadeInMs = 240;
-  constexpr unsigned FadeDelayMs = 70;
-  constexpr unsigned FadeOutMs = 120; // Linear.
+  // Compatibility aliases: Timing is the single source (v0.2 hover delay is 150, not 120).
+  constexpr unsigned HoverEnterMs = Timing::HoverDelayMsDefault;
+  constexpr unsigned HoverLeaveMs = Timing::CollapseDelayMs;
+  constexpr unsigned HudMs = Timing::HudVisibleMs;
+  constexpr unsigned FadeInMs = Timing::ContentFadeInMs;
+  constexpr unsigned FadeDelayMs = Timing::ContentFadeDelayMs;
+  constexpr unsigned FadeOutMs = Timing::ContentFadeOutMs; // Linear.
   constexpr unsigned ReducedFadeMs = 100; // Both fades, no delay/blur; fade-in cubic, fade-out linear.
   constexpr float ContentBlur = 3.0f;
   constexpr std::array<float, 4> FadeBezier = { 0.2f, 0.8f, 0.2f, 1.0f };
   constexpr std::array<unsigned, 4> WavePeriodsMs = { 820, 640, 1040, 760 };
   constexpr std::array<int, 4> WavePhaseMs = { -120, -380, -60, -520 }; // CSS animation-delay.
   constexpr float WaveMinimumScale = 0.28f; // 16 DIP * 0.28 = 4.48 DIP, user-approved.
+  constexpr float ReducedMotionWaveHeight = 10.0f; // Static bars, DIP, centered on y = 17.
   // CSS Easing Functions Level 1: ease-in-out is this cubic, not a new design curve.
   constexpr std::array<float, 4> WaveBezier = { 0.42f, 0.0f, 0.58f, 1.0f };
   // Each half-cycle uses WaveBezier; negative delay starts partway into the cycle.
@@ -715,6 +814,30 @@ namespace Spring {
   constexpr SpringParams CompactToIdle { 341.5f, 35.11f, 1.0f }; // response 0.34s, damping ratio 0.95
   constexpr SpringParams ToHud { 438.6f, 28.48f, 1.0f }; // response 0.3s, damping ratio 0.68
   constexpr SpringParams FromHud { 273.4f, 29.10f, 1.0f }; // response 0.38s, damping ratio 0.88
+  constexpr SpringParams HoverSwell { 503.6f, 27.83f, 1.0f }; // response 0.28s, damping ratio 0.62
+}
+
+// Defaults for %APPDATA%\NotchIsland\config.json. Used per field when the file,
+// the field, or its value is missing or invalid.
+enum class TitleFont { Serif, Sans };
+struct UserConfig {
+  int          version;
+  TitleFont    titleFont;
+  D2D1_COLOR_F accentColor;   // replaces Sky; see AccentStart()
+  unsigned     hoverDelayMs;  // clamped to [0, 1000]
+  int          monitorIndex;  // 0 = primary; 1..n = others sorted by left edge
+};
+constexpr UserConfig kDefaultConfig { 1, TitleFont::Serif, Color::Sky, 150u, 0 };
+
+// Gradient start for the accent. The default accent keeps the designed Aqua -> Sky pair;
+// a custom accent mixes 35% white into itself.
+inline D2D1_COLOR_F AccentStart(const D2D1_COLOR_F& accent) {
+  const bool isDefault = std::fabs(accent.r - Color::Sky.r) < 0.002f &&
+                         std::fabs(accent.g - Color::Sky.g) < 0.002f &&
+                         std::fabs(accent.b - Color::Sky.b) < 0.002f;
+  if (isDefault) return Color::Aqua;
+  return { accent.r + (1.0f - accent.r) * 0.35f, accent.g + (1.0f - accent.g) * 0.35f,
+           accent.b + (1.0f - accent.b) * 0.35f, 1.0f };
 }
 
 struct SpringValue { float x, v, target; };
@@ -767,3 +890,24 @@ inline HRESULT BuildIslandGeometry(ID2D1Factory* factory, float W, float H, floa
 
 } // namespace NotchIsland
 ```
+
+---
+
+## Lampiran B — Kompatibilitas M0/M1 (dipulihkan di v0.2)
+
+Penggantian utuh ke v0.2 sempat menghapus token M0/M1 yang sudah dipakai kode. SPEC-PATCH v0.2 menyatakan header v0.2 "hanya menambah konstanta", jadi token tersebut dipulihkan dari versi sebelumnya (git `HEAD`) ke Lampiran A tanpa mengubah nilai v0.2. Jika ada konflik, nilai v0.2 menang dan token lama menjadi alias.
+
+| Namespace / token | Status | Catatan |
+|---|---|---|
+| `WindowSpec`, `PaintSpec` (M0) | Dipulihkan apa adanya | Window tetap 492 × 193 DIP, anchor ke `rcMonitor` (bukan `rcWork`). Karena semua lebar geom genap, body di tengah window = rumus anchor Bagian 2, jadi keduanya setara. Stroke tetap dalam DIP: lens/debug 1, rim 2 (di-mask jadi 1 di dalam). |
+| `Idle::Body/LeftEar/RightEar`, `Color::Transparent` | Dipulihkan | Rect debug turunan `kGeomIdle`; clear swap chain `{0, 0, 0, 0}`. |
+| `Typography` | Dipulihkan | Tabel Bagian 7 sebagai data. `MediaTitle` = default `titleFont` serif; varian sans memakai family Bagian 7 (implementasi config di luar lingkup ini). `FallbackFamily` hanya untuk kegagalan DirectWrite, bukan fallback Windows 10. |
+| `DebugHud` | Dipulihkan tanpa redesain | `FpsRect = {8, 6, 64, 17}`, micro label tabular, aktif Aqua × 0.75, `IDLE` dengan `Label3` (alpha 0.30 sekali). Dua toggle **independen**, default mati: FPS `Ctrl+Shift+F`, bounds `Ctrl+Alt+F12`. Tidak ada timer render hanya untuk FPS. |
+| `Motion` | Dipulihkan; timing jadi alias | `HoverEnterMs = Timing::HoverDelayMsDefault` (150, **bukan** 120 lama), `HoverLeaveMs = Timing::CollapseDelayMs` (250), `HudMs`, `FadeInMs`, `FadeDelayMs`, `FadeOutMs` → `Timing::*`. Nilai baru: `ReducedMotionWaveHeight = 10` DIP (Bagian 8.3). Fixed step 1/240, maks delta 1/20, fade bezier, periode/fase wave, `WaveBezier` (CSS `ease-in-out`) tetap. |
+| Waveform minimum | Dipertahankan | Keputusan pengguna M1: `WaveMinimumScale = 0.28`, `16 × 0.28 = 4.48` DIP. Prosa v0.2 yang menyebut 4 atau 4.5 diselaraskan ke **4.48**. Paused tetap titik 3 DIP (`kPausedDotHeight`); reduced motion statis 10 DIP. |
+| `PaintSpec` ring/drop, `TabStride`, offset tile | Dipulihkan | Stroke ring 3.5/2.5, dash drop 1/4/3, stride tab 84, offset icon/nama tile (12,12)/(12,40), inset kanan 10. |
+| `Glyph`, `Demo` | Dipulihkan apa adanya | Terjemahan SVG `G` HTML dan sample deterministik HTML (bukan data sistem). Artwork placeholder `Color::Label`. |
+
+- Reduced motion fade: masuk/keluar masing-masing 100 ms tanpa delay/blur; masuk cubic `(0.2, 0.8, 0.2, 1)`, keluar linear.
+- `tools/verify-spec.cjs` memeriksa: header = Lampiran A, nilai HTML asli untuk token yang berasal dari HTML, tambahan v0.2 (`Dot0–3`, swell, paused, `Timing`, `HoverSwell`, `kDefaultConfig`) terhadap tabel DESIGN, serta keberadaan token Lampiran B ini dan alias `Motion` → `Timing`.
+- Perbedaan referensi HTML yang tetap berlaku: tab bergeser dengan pegas `ToExpanded` (bukan CSS 380 ms); pause membekukan bar jadi titik 3 DIP (bukan fase HTML); hover memakai 150/250 ms (HTML tanpa delay); telemetri 1000 ms dan 500 ms ease-out (HTML 1400/600 ms); dekorasi HTML tambahan (highlight, knob shadow, variasi glow) tidak diimpor.

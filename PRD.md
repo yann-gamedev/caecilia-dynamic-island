@@ -1,10 +1,10 @@
-# PRD.md — Caecilia Notch Island
+# PRD.md — Notch Island
 
 | | |
 |---|---|
-| Produk | Caecilia Notch Island — overlay Dynamic Island untuk Windows |
+| Produk | Notch Island — overlay Dynamic Island untuk Windows |
 | Pemilik | Chris |
-| Status | Draft v0.1 |
+| Status | Draft v0.2 — keputusan D1–D4 dikunci |
 | Tanggal | 18 Oktober 2026 |
 | Dokumen terkait | `DESIGN.md` (spesifikasi visual & angka), `NotchIslandSpec.h` |
 
@@ -12,7 +12,7 @@
 
 ## 1. Ringkasan
 
-Caecilia Notch Island adalah aplikasi desktop Windows yang menampilkan "pulau" hitam kecil di tengah atas layar, meniru macOS Notch / Dynamic Island. Dalam keadaan diam ia hampir tak terlihat. Saat ada musik diputar ia menampilkan cover dan waveform kecil. Saat di-hover ia membesar jadi dashboard berisi kontrol media, telemetri sistem, dan tempat menaruh file sementara. Saat volume, brightness, atau timer berubah, ia menampilkan HUD singkat menggantikan OSD bawaan Windows.
+Notch Island adalah aplikasi desktop Windows yang menampilkan "pulau" hitam kecil di tengah atas layar, meniru macOS Notch / Dynamic Island. Dalam keadaan diam ia hampir tak terlihat. Saat ada musik diputar ia menampilkan cover dan waveform kecil. Saat di-hover ia membesar jadi dashboard berisi kontrol media, telemetri sistem, dan tempat menaruh file sementara. Saat volume, brightness, atau timer berubah, ia menampilkan HUD singkat menggantikan OSD bawaan Windows.
 
 Aplikasi ditulis dalam **C++ native dengan Direct2D**, agar ringan, mulus di 60–144 Hz, dan tidak bergantung pada runtime besar seperti Electron atau WebView.
 
@@ -33,16 +33,17 @@ Aplikasi ditulis dalam **C++ native dengan Direct2D**, agar ringan, mulus di 60�
 
 ## 4. Bukan tujuan (v1)
 
-- Dukungan multi-monitor (v1 hanya monitor utama).
+- Island di beberapa monitor sekaligus (v1: satu island, di monitor yang dipilih `monitorIndex`).
 - Notifikasi aplikasi pihak ketiga (WhatsApp, Discord, dll.).
 - Tema terang atau kustomisasi warna oleh pengguna.
 - Plugin / API eksternal.
-- Dukungan Windows 10 di bawah build 19041 dan semua versi Windows sebelum 10.
+- Windows 10 dan semua versi sebelum Windows 11. Tidak ada workaround legacy.
+- Arsitektur ARM64 dan x86 32-bit (v1 hanya x64).
 - Menyembunyikan OSD bawaan Windows secara paksa (lihat Risiko R3).
 
 ## 5. Pengguna
 
-- **Pengguna utama:** pengguna Windows 10/11 yang sering memutar musik sambil bekerja dan suka estetika macOS / minimalis.
+- **Pengguna utama:** pengguna Windows 11 yang sering memutar musik sambil bekerja dan suka estetika macOS / minimalis.
 - **Pengguna sekunder:** developer dan power user yang ingin melihat beban CPU/RAM/GPU sekilas tanpa membuka Task Manager.
 
 ### User stories
@@ -61,14 +62,15 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 
 | ID | Kebutuhan | Prioritas |
 |---|---|---|
-| FR-01 | Window overlay borderless ukuran tetap 492 × 193 DIP, di-anchor di tengah atas monitor utama, selalu di atas (`WS_EX_TOPMOST`), tanpa ikon taskbar (`WS_EX_TOOLWINDOW`), tidak mengambil fokus (`WS_EX_NOACTIVATE`). | P0 |
+| FR-01 | Window overlay borderless ukuran tetap 492 × 193 DIP, di-anchor di tengah atas monitor `monitorIndex` (default primary), selalu di atas (`WS_EX_TOPMOST`), tanpa ikon taskbar (`WS_EX_TOOLWINDOW`), tidak mengambil fokus (`WS_EX_NOACTIVATE`). | P0 |
 | FR-02 | Render per-pixel alpha lewat DirectComposition + swap chain `DXGI_ALPHA_MODE_PREMULTIPLIED`. | P0 |
 | FR-03 | Hit-test mengikuti bentuk island; area lain mengembalikan `HTTRANSPARENT`. | P0 |
 | FR-04 | Mendukung per-monitor DPI v2; posisi dan ukuran benar pada 100–200% scaling, dan saat scaling berubah tanpa restart. | P0 |
-| FR-05 | Menyembunyikan island saat aplikasi fullscreen aktif (`SHQueryUserNotificationState`), kecuali HUD. | P1 |
-| FR-06 | Ikon tray dengan menu: Pause island, Mulai saat login, Keluar. | P1 |
+| FR-05 | Menyembunyikan island saat aplikasi fullscreen aktif (`SHQueryUserNotificationState`), kecuali HUD. Pin di-clear. | P1 |
+| FR-06 | Ikon tray dengan menu: Pause island, Mulai saat login, Reload config, Buka folder config, Keluar. | P1 |
 | FR-07 | Opsi "Mulai saat login" lewat registry `HKCU\...\Run`. | P1 |
 | FR-08 | Satu instance saja (named mutex). | P0 |
+| FR-09 | Saat start, cek versi OS lewat `RtlGetVersion`; jika build < 22000 tampilkan pesan "Notch Island membutuhkan Windows 11" lalu keluar. | P0 |
 
 ### 6.2 State & animasi
 
@@ -78,7 +80,11 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 | FR-11 | Outline dengan liquid ears dan sudut bawah continuous curvature sesuai `DESIGN.md` Bagian 4. | P0 |
 | FR-12 | Transisi antar state memakai pegas dari `DESIGN.md` Bagian 8, termasuk meneruskan velocity saat transisi terputus. | P0 |
 | FR-13 | State machine dengan prioritas HUD > Expanded > Compact > Dormant. | P0 |
-| FR-14 | Hover 120 ms membuka Expanded; keluar 250 ms menutupnya. | P0 |
+| FR-14 | Kursor masuk ke Dormant/Compact memicu **Hover Swell** seketika (+8 W, +2 H, +1 r, pegas `HoverSwell`). Setelah `hoverDelayMs` (default **150 ms**) island menjadi Expanded. Kursor keluar dari Expanded yang tidak pinned → collapse setelah 250 ms. | P0 |
+| FR-16 | **Klik kiri** di Dormant/Compact melewati delay, langsung membuka Expanded, dan mem-*pin*-nya (tetap terbuka saat kursor keluar). Klik kiri di area kosong saat pinned → unpin & collapse; hover diabaikan sampai kursor keluar sekali. Klik kiri di area kosong Expanded yang dibuka hover → pin. | P0 |
+| FR-17 | Mouse-down di luar island saat pinned → unpin & collapse, klik tetap diteruskan. Diimplementasikan dengan `WH_MOUSE_LL` yang hanya terpasang selama pinned. | P0 |
+| FR-18 | **Klik tengah** di Compact → play/pause global lewat SMTC, tanpa expand. Di state lain diabaikan. | P0 |
+| FR-19 | Pin bertahan melewati HUD: setelah HUD selesai, kembali ke Expanded jika masih pinned. | P0 |
 | FR-15 | Reduced motion mengikuti setting Windows. | P1 |
 
 ### 6.3 Media (Compact & tab Now Playing)
@@ -86,7 +92,8 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 | ID | Kebutuhan | Prioritas |
 |---|---|---|
 | FR-20 | Membaca sesi media aktif lewat `GlobalSystemMediaTransportControlsSessionManager` (C++/WinRT): judul, artis, thumbnail, status play, posisi, durasi. | P0 |
-| FR-21 | Compact muncul otomatis saat ada sesi berstatus Playing; kembali ke Dormant 5 detik setelah pause/stop. | P0 |
+| FR-21 | Compact muncul otomatis saat ada sesi berstatus Playing. Saat pause, Compact bertahan **30 detik** (grace): wave bar membeku jadi titik 3 × 3 DIP dan mini art turun ke 50% opacity (transisi 200 ms). Resume dalam grace mengembalikan tampilan playing. Lewat 30 detik → morph ke Dormant. | P0 |
+| FR-21a | Jika aplikasi media ditutup (tidak ada sesi SMTC aktif), langsung ke Dormant tanpa grace dan clear pin. | P0 |
 | FR-22 | Tombol Prev, Play/Pause, Next mengirim perintah ke sesi aktif. | P0 |
 | FR-23 | Scrub bar bisa di-drag untuk seek (`TryChangePlaybackPositionAsync`). Jika aplikasi tidak mendukung seek, bar tetap tampil tetapi tidak bisa di-drag. | P1 |
 | FR-24 | Waveform 4 bar beranimasi saat playing (animasi dekoratif, bukan analisis audio sungguhan). | P0 |
@@ -124,8 +131,17 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 
 | ID | Kebutuhan | Prioritas |
 |---|---|---|
-| FR-60 | `Ctrl+Alt+F12` men-toggle bounding box semua elemen (stroke 1 DIP Aqua). `Ctrl+Shift+F` men-toggle FPS secara independen (`showDebugFps = false` default); saat renderer diam tampil `IDLE`, tanpa membangunkan render loop berkala. Layout dan warna mengikuti `DESIGN.md` DebugHud. | P0 |
+| FR-60 | `Ctrl+Alt+F12` menampilkan overlay bounding box semua elemen (stroke 1 px Aqua) dan FPS. | P0 |
 | FR-61 | Mode demo (`--demo`) yang memutar data palsu untuk semua state tanpa butuh media/telemetri nyata. | P0 |
+
+### 6.8 Konfigurasi
+
+| ID | Kebutuhan | Prioritas |
+|---|---|---|
+| FR-70 | Baca `%APPDATA%\NotchIsland\config.json`, path dari `SHGetKnownFolderPath(FOLDERID_RoamingAppData)`. Skema dan aturan validasi: `DESIGN.md` Bagian 10. | P0 |
+| FR-71 | Field: `version`, `titleFont` (`serif`/`sans`), `accentColor` (`#RRGGBB`), `hoverDelayMs` (0–1000), `monitorIndex`. | P0 |
+| FR-72 | File tidak ada → tulis file default. JSON rusak → pakai default tanpa menimpa file. Field tidak valid → default untuk field itu saja. | P0 |
+| FR-73 | Reload dari menu tray tanpa restart: aksen, font judul, dan delay langsung berlaku; perubahan monitor memindahkan window. | P1 |
 
 ## 7. Kebutuhan non-fungsional
 
@@ -136,7 +152,7 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 | NFR-03 | Memori (working set) | < 40 MB |
 | NFR-04 | Waktu mulai sampai island tampil | < 300 ms |
 | NFR-05 | Frame rate animasi | Mengikuti refresh monitor (60–165 Hz), render loop berhenti saat tidak ada animasi |
-| NFR-06 | Latensi hover → mulai animasi | ≤ 120 ms (sesuai delay desain) + 1 frame |
+| NFR-06 | Latensi input → mulai animasi | Hover Swell dan klik: ≤ 1 frame. Expanded via hover: `hoverDelayMs` + 1 frame |
 | NFR-07 | Ukuran installer/zip | < 5 MB |
 | NFR-08 | Ketepatan visual | Selisih ≤ 1 px terhadap prototipe pada 100% dan 150% scaling |
 | NFR-09 | Stabilitas | Bertahan saat GPU device lost (`D2DERR_RECREATE_TARGET`), sleep/resume, dan perubahan resolusi |
@@ -154,15 +170,16 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 | Media | C++/WinRT, `Windows.Media.Control` |
 | Audio | Core Audio (`IMMDeviceEnumerator`, `IAudioEndpointVolume`) |
 | Telemetri | Win32 API + PDH |
-| Target OS | Windows 10 build 19041+ dan Windows 11 |
+| Target OS | **Windows 11 x64 saja** (build 22000+), Windows App SDK tidak diperlukan |
+| Config | JSON (`nlohmann/json`, header-only via vcpkg) |
 
 ## 9. Rilis bertahap
 
 | Milestone | Isi | Selesai jika |
 |---|---|---|
-| **M0 — Fondasi** | Window overlay, DComp + D2D, DPI, hit-test bentuk, debug overlay, mode demo | Island Dormant tampil tepat di tengah atas, klik di luar tembus |
-| **M1 — Bentuk & gerak** | Outline, permukaan/rim/shadow, state machine, pegas, hover | Keempat state bisa dipicu di mode demo, cocok dengan prototipe |
-| **M2 — Media** | SMTC, Compact, tab Now Playing, kontrol, scrub | Spotify / browser bisa dikontrol dari island |
+| **M0 — Fondasi** | Cek Windows 11, window overlay, DComp + D2D, DPI, hit-test bentuk, config.json, debug overlay, mode demo | Island Dormant tampil tepat di tengah atas, klik di luar tembus |
+| **M1 — Bentuk & gerak** | Outline, permukaan/rim/shadow, state machine, pegas, Hover Swell, hover delay, klik-pin, unpin di luar | Keempat state bisa dipicu di mode demo, cocok dengan prototipe |
+| **M2 — Media** | SMTC, Compact, grace pause 30 detik, klik tengah, tab Now Playing, kontrol, scrub | Spotify / browser bisa dikontrol dari island |
 | **M3 — Sistem** | Telemetri, HUD volume/brightness, Pomodoro, tray menu, autostart | Semua P0 + P1 selesai kecuali Drop Tray |
 | **M4 — Drop Tray & polish** | Drag-drop, fullscreen hide, reduced motion, device-lost, installer | Semua kriteria Bagian 10 lolos |
 
@@ -184,5 +201,19 @@ Prioritas: **P0** wajib untuk v1, **P1** sebaiknya ada di v1, **P2** nanti.
 | R4 | Window topmost tertutup aplikasi topmost lain atau game | Re-assert `HWND_TOPMOST` saat foreground berubah (`EVENT_SYSTEM_FOREGROUND`) |
 | R5 | Monitor dengan notch kamera / bezel tipis membuat island menutupi konten | Opsi offset Y di config, default 0 |
 | R6 | Shadow blur mahal di setiap frame | Render shadow ke bitmap cache saat diam; saat animasi pakai effect dengan kualitas `SPEED` |
+| R7 | Low-level mouse hook bisa dicabut Windows jika callback lambat (`LowLevelHooksTimeout`), dan dicurigai antivirus | Hook hanya aktif selama pinned, callback hanya membandingkan titik dengan rect window lalu `PostMessage`, tanpa kerja berat |
+| R8 | Klik kiri sebagai pin bisa tak sengaja terjadi saat pengguna ingin klik aplikasi di bawah island | Hit-test mengikuti bentuk; Dormant hanya 160 × 28 DIP. Pantau di uji pemakaian, pertimbangkan opsi config `clickToPin` di v1.1 |
 
+## 12. Keputusan yang dikunci (v0.2)
 
+| # | Pertanyaan | Keputusan |
+|---|---|---|
+| D1 | Klik atau hover? | Keduanya. Hover → Swell seketika → Expanded setelah 150 ms, collapse saat keluar. Klik kiri → Expanded seketika + pin toggle. Klik tengah di Compact → play/pause. (FR-14, FR-16–FR-19) |
+| D2 | Compact saat pause? | Grace 30 detik dengan titik 3 DIP dan art 50%. Lewat grace atau aplikasi ditutup → Dormant. (FR-21, FR-21a) |
+| D3 | Format config? | JSON di `%APPDATA%\NotchIsland\config.json` dengan default per field. (FR-70–FR-73) |
+| D4 | Target OS? | Windows 11 x64 saja. (FR-09) |
+
+## 13. Pertanyaan terbuka
+
+1. Visualizer: desain dan spec memakai **4 bar**. Jika ingin 5 bar, rect di `DESIGN.md` Bagian 5 (Compact) harus diubah dan lebar Compact mungkin perlu ditambah. Saat ini tetap 4.
+2. Apakah island pinned perlu penanda visual (mis. rim sedikit lebih terang)? Saat ini tidak ada penanda.

@@ -6,8 +6,15 @@
   1/20 s max elapsed per frame and preserved velocities on interruption.
 - Shared current path, fixed HWND, Core/Obsidian interpolation, internally masked
   rim with origin pixel snapping, shadow SPEED during animation/cached at rest.
-- State precedence HUD > Expanded > Compact > Dormant; hover entry/exit 120/250 ms.
-- Demo keys 1–4/V/B/P only while pointer is inside; no focus capture/key suppression.
+- State precedence HUD > Expanded > Compact > Dormant; hover entry/exit 150/250 ms (v0.2).
+- Hover Swell (+8 W / +2 H / +1 r, `Spring::HoverSwell`) from the first frame; ToExpanded
+  takes over with preserved velocity; no swell in HUD/Expanded/pinned/suppressHover/reduced motion.
+- Click-pin, empty-area pin toggle, `suppressHover`, outside unpin via `WH_MOUSE_LL` installed
+  only while pinned (post-only, always `CallNextHookEx`). Pin survives HUD and base changes.
+- Content origin `x = (W_current − W_target) / 2` keeps layouts centered during morph/swell.
+- Pointer re-sampled after the raw-input burst (WM_INPUT can precede the cursor update).
+- Demo keys 1–4/V/B/P/Space/C only while pointer is inside; no focus capture/key suppression.
+  Middle click on Compact toggles the fake wave (SMTC in M2).
 - Pinned key-4 HUD, transient 1800 ms HUD refresh, return to base/hover state.
 - Incoming delayed cubic fade/blur and outgoing linear fade; tab pill spring.
 - All static demo layouts: Compact, three Expanded tabs, Volume/Brightness/Pomodoro.
@@ -25,6 +32,10 @@
 - PASS: spring transitions, retarget velocity, 60/120/144/240 Hz fixed-step equivalence,
   frame clamp, settling/snap, HUD precedence/refresh/pin/dismiss and hover cancellation.
 - PASS: startup smoke test remained alive/responding after five seconds.
+- PASS (v0.2, injected mouse/keys at 100%, screenshots): swell before delay, hover expand,
+  still open 150 ms after leave, collapsed after 250 ms, click-pin survives leave, outside
+  click unpins, empty-area click unpins + suppresses re-open, re-entry swells again,
+  `2` Compact, middle click toggles wave without expanding, Compact swell, `C` → Dormant.
 - Code review fixed tab transition consuming pre-click idle time and content glyphs
   accidentally inheriting a previous frame's body/window transform.
 - MSVC `/W4 /WX`, visual animation/alpha-effects correctness and target-machine
@@ -38,7 +49,8 @@ Place the pointer in the island for demo key controls.
 - [ ] Keys 1/2/3/4 reach all four states; no black rectangular envelope.
 - [ ] 4 remains HUD; V/B/P refresh 1800 ms and restore the appropriate state.
 - [ ] Fast interrupted transitions carry momentum smoothly, without sharp corners.
-- [ ] Hover waits 120 ms; leaving collapses after 250 ms without flicker.
+- [ ] Hover swells at once, expands after 150 ms; leaving collapses after 250 ms without flicker.
+- [ ] Click pins; outside click unpins and still reaches the app; empty-area click unpins.
 - [ ] Three tabs animate the pill and show correctly placed content/glyphs.
 - [ ] Ctrl+Alt+F12 rects match DESIGN at 100% and 150%; HWND envelope does not animate.
 - [ ] Ctrl+Shift+F shows FPS while moving/waving, then IDLE for settled non-wave states.

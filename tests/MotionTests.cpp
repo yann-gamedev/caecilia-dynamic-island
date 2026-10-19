@@ -144,8 +144,8 @@ void TestStateMachine() {
     Require(state.Current() == IslandState::Dormant && !state.NextDeadline(), "Initial state must be idle");
     state.SetBase(IslandState::Compact, start);
     Require(state.Current() == IslandState::Compact, "Compact base selection");
-    state.SetExpanded(true);
-    Require(state.Current() == IslandState::Expanded && !state.NextDeadline(), "Demo expansion must stay pinned");
+    state.Pin();
+    Require(state.Current() == IslandState::Expanded && !state.NextDeadline(), "Pinned expansion must stay");
     state.Tick(start + duration);
     Require(state.Current() == IslandState::Expanded, "Expansion cannot expire without a leave decision");
     state.TriggerHud(HudKind::Volume, start);
@@ -158,24 +158,27 @@ void TestStateMachine() {
     Require(state.Current() == IslandState::Hud, "Refreshed HUD cannot expire at the old deadline");
     state.Tick(*state.NextDeadline());
     Require(state.Current() == IslandState::Expanded && !state.NextDeadline(), "HUD expiry must restore expansion and clear timer");
-    state.SetExpanded(false);
-    Require(state.Current() == IslandState::Compact, "Leave must restore Compact base");
+    state.Unpin();
+    Require(state.Current() == IslandState::Compact, "Unpin must restore Compact base");
 
-    state.SetExpanded(true);
+    state.Pin();
     state.TriggerHud(HudKind::Pomodoro, start);
     state.SetBase(IslandState::Dormant, start + Motion::FixedStep);
     Require(state.Current() == IslandState::Hud && state.Hud() == HudKind::Pomodoro,
-            "Demo base selection must not dismiss an active HUD");
+            "Base change must not dismiss an active HUD");
     Require(*state.NextDeadline() == start + duration, "Base selection cannot refresh HUD expiry");
     state.Tick(*state.NextDeadline());
-    Require(state.Current() == IslandState::Dormant && !state.NextDeadline(), "Base selection must release pinned expansion");
-    state.SetExpanded(true);
+    Require(state.Current() == IslandState::Expanded && !state.NextDeadline(),
+            "Pin survives HUD and base change (DESIGN 3.0)");
+    state.CloseMedia(start + duration);
+    Require(state.Current() == IslandState::Dormant && !state.Pinned(), "Closing media clears pin");
     state.SetBase(IslandState::Compact, start + duration);
-    Require(state.Current() == IslandState::Compact, "Demo key 2 must release expansion");
     state.TriggerHud(HudKind::Volume, start + duration);
-    state.SetExpanded(true);
-    Require(state.Current() == IslandState::Hud, "Hover cannot override HUD");
-    state.SetExpanded(false);
+    state.SetHovered(true);
+    state.SetHoverExpanded(true);
+    Require(state.Current() == IslandState::Hud && !state.Swell(), "Hover cannot override HUD or swell it");
+    state.SetHoverExpanded(false);
+    state.SetHovered(false);
     state.Tick(*state.NextDeadline());
     Require(state.Current() == IslandState::Compact && !state.NextDeadline(), "Leave during HUD must affect return state");
     state.TriggerHud(HudKind::Volume, start);
@@ -234,12 +237,47 @@ void TestHover() {
     Require(cancelled.Tick(*cancelled.NextDeadline()) == std::optional<bool>(true), "Reentry must arm a fresh enter delay");
     Require(!cancelled.NextDeadline(), "No deadline may remain after final hover decision");
 
-    StateMachine pinned;
-    pinned.SetExpanded(true);
+    StateMachine hovered;
+    hovered.SetHoverExpanded(true);
     cancelled.Pointer(false, cancelledLeave + enter);
     const double collapseAt = *cancelled.NextDeadline();
-    if (const auto decision = cancelled.Tick(collapseAt)) { pinned.SetExpanded(*decision); }
-    Require(pinned.Current() == IslandState::Dormant, "Delayed pointer leave must release demo expansion");
+    if (const auto decision = cancelled.Tick(collapseAt)) { hovered.SetHoverExpanded(*decision); }
+    Require(hovered.Current() == IslandState::Dormant, "Delayed pointer leave must release hover expansion");
+}
+
+void TestSwellAndPin() {
+    StateMachine s;
+    s.SetHovered(true);
+    Require(s.Current() == IslandState::Dormant && s.Swell(), "Enter swells Dormant at once");
+    const auto g = TargetGeometry(IslandState::Dormant, true);
+    Require(g.width == kGeomIdle.width + kSwellDeltaWidth && g.height == kGeomIdle.height + kSwellDeltaHeight &&
+            g.bottomRadius == kGeomIdle.bottomRadius + kSwellDeltaBottomRadius &&
+            g.earRadius == kGeomIdle.earRadius, "Swell deltas (DESIGN 3.2)");
+    Require(TargetGeometry(IslandState::Expanded, true).width == kGeomExpanded.width, "No swell on Expanded");
+    s.SetHoverExpanded(true);
+    Require(s.Current() == IslandState::Expanded && !s.Swell(), "Hover delay expands, swell ends");
+    s.SetHovered(false);
+    s.SetHoverExpanded(false);
+    Require(s.Current() == IslandState::Dormant, "Unpinned collapse after leave delay");
+
+    s.SetHovered(true);
+    s.Pin(); // click
+    s.SetHovered(false);
+    s.SetHoverExpanded(false);
+    Require(s.Current() == IslandState::Expanded && !s.Swell(), "Pinned survives leave, never swells");
+    s.SetHovered(true);
+    s.Unpin(); // click on empty area while hovered
+    Require(s.Current() == IslandState::Dormant && !s.Swell(), "Unpin collapses and suppresses hover");
+    s.SetHoverExpanded(true);
+    Require(s.Current() == IslandState::Dormant, "suppressHover blocks re-open");
+    s.SetHovered(false);
+    s.SetHovered(true);
+    Require(s.Swell(), "Leaving clears suppressHover");
+    s.SetHovered(false);
+    s.Pin();
+    s.Unpin(); // outside mouse-down: pointer outside, no suppression
+    s.SetHovered(true);
+    Require(s.Swell(), "Outside unpin does not suppress");
 }
 } // namespace
 
@@ -249,7 +287,8 @@ int main() {
         TestRetargetAndTiming();
         TestStateMachine();
         TestHover();
-        std::puts("PASS: spring transitions, retargeting, fixed-step timing, state priority, HUD and hover deadlines");
+        TestSwellAndPin();
+        std::puts("PASS: spring transitions, retargeting, fixed-step timing, state priority, HUD, hover, swell and pin");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

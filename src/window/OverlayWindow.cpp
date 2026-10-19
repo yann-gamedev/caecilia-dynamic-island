@@ -13,7 +13,10 @@ constexpr wchar_t kWindowClass[] = L"Caecilia.NotchIsland.Overlay";
 constexpr int kBoundsHotkey = 1;
 constexpr int kFpsHotkey = 2;
 constexpr UINT_PTR kRecoveryTimer = 1;
+constexpr UINT_PTR kPointerTimer = 2;
 constexpr UINT kRepositionMessage = WM_APP + 1;
+constexpr UINT kOutsideDownMessage = WM_APP + 2;
+HWND gHookTarget{}; // Single-instance app; the LL hook callback has no user data.
 // Operational device-recovery backoff, not an animation or visual duration.
 constexpr UINT kRecoveryBackoffMs = 1000;
 }
@@ -139,7 +142,34 @@ void OverlayWindow::CancelRecovery() noexcept {
         recoveryTimer_ = false;
     }
 }
+void OverlayWindow::SetOutsideClickHook(bool enabled) {
+    if (enabled == (mouseHook_ != nullptr)) { return; }
+    if (enabled) {
+        gHookTarget = hwnd_;
+        mouseHook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance_, 0);
+        CheckWin32(mouseHook_ != nullptr, "SetWindowsHookEx WH_MOUSE_LL");
+    } else {
+        if (!UnhookWindowsHookEx(mouseHook_)) { Log("UnhookWindowsHookEx failed"); }
+        mouseHook_ = nullptr;
+    }
+}
+
+LRESULT CALLBACK OverlayWindow::MouseHook(int code, WPARAM wparam, LPARAM lparam) noexcept {
+    // Only forward the point; the UI thread does the shape test. Never block the event.
+    if (code == HC_ACTION && gHookTarget &&
+        (wparam == WM_LBUTTONDOWN || wparam == WM_RBUTTONDOWN || wparam == WM_MBUTTONDOWN)) {
+        const POINT point = reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam)->pt;
+        PostMessageW(gHookTarget, kOutsideDownMessage, 0, MAKELPARAM(point.x, point.y));
+    }
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+
 void OverlayWindow::Close() noexcept {
+    if (mouseHook_) {
+        if (!UnhookWindowsHookEx(mouseHook_)) { Log("UnhookWindowsHookEx failed"); }
+        mouseHook_ = nullptr;
+    }
+    gHookTarget = nullptr;
     if (hwnd_) {
         CancelRecovery();
         if (boundsHotkey_ && !UnregisterHotKey(hwnd_, kBoundsHotkey)) { Log("UnregisterHotKey bounds failed"); }
@@ -198,7 +228,12 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         const UINT read = GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam), RID_INPUT,
                                          &packet, &size, sizeof(RAWINPUTHEADER));
         if (read == static_cast<UINT>(-1)) { CheckWin32(FALSE, "GetRawInputData"); }
-        if (packet.header.dwType == RIM_TYPEMOUSE) { UpdatePointer(); }
+        if (packet.header.dwType == RIM_TYPEMOUSE) {
+            UpdatePointer();
+            // WM_INPUT can precede the cursor update, so GetCursorPos lags one packet.
+            // Re-sample once input goes quiet; re-arming coalesces the stream.
+            CheckWin32(SetTimer(hwnd_, kPointerTimer, USER_TIMER_MINIMUM, nullptr) != 0, "SetTimer pointer");
+        }
         if (keyboardInput_ && packet.header.dwType == RIM_TYPEKEYBOARD) {
             const UINT key = packet.data.keyboard.VKey;
             if (key < 256) {
@@ -227,6 +262,17 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         CheckWin32(ClientToScreen(hwnd_, &screen), "ClientToScreen click");
         const auto point = BodyPoint(screen);
         if (geometry_->Contains(point)) { events_->OnClick(point); }
+        return 0;
+    }
+    case WM_MBUTTONUP: {
+        POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        CheckWin32(ClientToScreen(hwnd_, &screen), "ClientToScreen middle click");
+        if (geometry_->Contains(BodyPoint(screen))) { events_->OnMiddleClick(); }
+        return 0;
+    }
+    case kOutsideDownMessage: {
+        const POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        if (mouseHook_ && !geometry_->Contains(BodyPoint(screen))) { events_->OnOutsideMouseDown(); }
         return 0;
     }
     case WM_PAINT: {
@@ -260,6 +306,7 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         return 0;
     case WM_TIMER:
         if (wparam == kRecoveryTimer) { CancelRecovery(); Invalidate(); }
+        if (wparam == kPointerTimer) { KillTimer(hwnd_, kPointerTimer); UpdatePointer(); }
         return 0;
     case WM_SETTINGCHANGE:
         events_->OnResume(); return 0;
