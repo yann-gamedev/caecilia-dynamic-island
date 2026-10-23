@@ -65,11 +65,12 @@ void Run(const std::filesystem::path& root) {
     Check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
         IID_PPV_ARGS(wic.GetAddressOf())), "Create WIC factory");
 
-    for (const UINT dpi : {96u, 144u}) {
+    for (const UINT dpi : {96u, 144u, 192u}) {
         const float resolution = static_cast<float>(dpi);
         const auto width = static_cast<UINT>(std::lround(WindowSpec::Width * resolution / WindowSpec::DpiBase));
         const auto height = static_cast<UINT>(std::lround(WindowSpec::Height * resolution / WindowSpec::DpiBase));
-        Require(width == (dpi == 96 ? 492u : 738u) && height == (dpi == 96 ? 193u : 290u),
+        Require(width == (dpi == 96 ? 492u : dpi == 144 ? 738u : 984u) &&
+            height == (dpi == 96 ? 193u : dpi == 144 ? 290u : 386u),
             "Unexpected physical bitmap dimensions");
         const auto directory = root / (std::to_string(dpi) + "dpi");
         std::filesystem::create_directories(directory);
@@ -168,7 +169,7 @@ void Run(const std::filesystem::path& root) {
         }
     }
     // ponytail: production Expanded reads the wall clock; inject a clock only if golden-image comparisons are added.
-    std::puts("PASS: 28 WARP/D2D PNGs, dimensions, alpha envelope, normal/reduced Compact time samples.\n"
+    std::puts("PASS: 42 WARP/D2D PNGs, dimensions, alpha envelope, normal/reduced Compact time samples.\n"
         "Offscreen SetDpi coverage only: NOT GetDpiForWindow/WM_DPICHANGED or desktop composition.");
 }
 }
