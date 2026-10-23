@@ -3,8 +3,8 @@
 Native C++20 Windows overlay: D3D11, DXGI, DirectComposition, Direct2D 1.1 and
 DirectWrite. No web UI or outgoing network requests.
 
-**M0 accepted by the user; M1 implemented and awaiting visual acceptance.**
-M2–M4 have not started. See [M0](docs/m0-status.md), [M1](docs/m1-status.md),
+**M0 accepted; M1 hardware/visual checks remain pending. M2.1 implementation started
+at the user's request; M2.2–M4 have not started.** See [M0](docs/m0-status.md), [M1](docs/m1-status.md), [M2.1](docs/m2-status.md),
 and [performance](docs/perf.md). M0 v0.2 fixes pass MSVC Debug/Release builds and
 CTest; manual acceptance procedures are in [M0](docs/m0-status.md#m0-v02-follow-up).
 
@@ -26,11 +26,9 @@ This is an unsigned alternative **MinGW x64** build with compiler runtime linked
 statically. Windows system DLLs remain required. No Visual Studio installation
 is needed to run it. Artifacts are ignored by Git, not published/downloadable releases.
 
-Rebuild offline using the installed MinGW toolchain:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-portable.ps1
-```
+This artifact is the historical M1 demo, not the current M2 app. The MinGW build
+script applies to the M1 revision; use the supported MSVC build below for M2's
+C++/WinRT integration.
 
 ## Supported MSVC build
 
@@ -48,8 +46,21 @@ ctest --test-dir build-msvc -C Release --output-on-failure
 ```
 
 CMake keeps MSVC as the supported toolchain; app and tests use `/W4 /WX`.
-M0/M1 use Windows SDK COM interfaces. C++/WinRT media starts in M2; an offline
+M2.1 uses C++/WinRT headers supplied by the Windows SDK; an offline
 include directory can be supplied with `-DCAECILIA_CPPWINRT_INCLUDE_DIR=...`.
+
+## M2.1 live media (MSVC build)
+
+Run `build-msvc\Release\CaeciliaNotchIsland.exe` **without `--demo`**. Hover or
+click the island and select Now Playing to see the selected Windows media session's
+metadata, artwork and event-sampled timeline. No media session shows an empty view;
+missing artwork uses the existing placeholder. Selection prefers Windows' current
+session, then a deterministic fallback. No network requests or periodic media polling.
+
+M2.1 does not automatically select Compact, implement pause grace, advance progress
+between timeline events, or enable playback/seek controls (M2.2/M2.3). Telemetry,
+files and HUD values are still static samples. `--demo` preserves the M1 fixture
+and does not request a GSMTC manager.
 
 ## M1 demo controls
 
@@ -150,11 +161,14 @@ M1 animation screenshots, rapid geometry-boundary clicks, DPI changes and GPU
 performance still need validation on the target machine; no no-race guarantee
 is claimed for asynchronous raw-input style changes.
 
-Offline spec verification (does not open the HTML's CDN UI):
+Offline spec verification against `DESIGN.md`:
 
 ```powershell
 node tools/verify-spec.cjs
 ```
 
 `DESIGN.md` Appendix A equals `src/spec/NotchIslandSpec.h`; numeric visual values
-belong there. The original HTML is a reference, never a runtime dependency.
+belong there. The original HTML prototype has been removed from the repository.
+Historical prototype comparisons remain documented in `docs/m1-status.md`; to capture
+an external copy, use `node tools/capture-m1-reference.cjs <external-prototype.html>`.
+Prototype comparison is no longer part of `verify-spec.cjs`.

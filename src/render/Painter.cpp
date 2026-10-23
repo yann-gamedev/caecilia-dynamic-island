@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <locale>
+#include <limits>
 
 namespace caecilia {
 using Microsoft::WRL::ComPtr;
@@ -80,8 +81,8 @@ ComPtr<ID2D1LinearGradientBrush> Gradient(ID2D1DeviceContext* context,
 class LayoutPainter {
 public:
     LayoutPainter(ID2D1DeviceContext* context, ID2D1Factory* factory, TextStyles& text,
-                  const Scene& scene, bool glowPass)
-        : context_(context), factory_(factory), text_(text), scene_(scene), glowPass_(glowPass) {
+                  const Scene& scene, bool glowPass, ID2D1Bitmap1* artwork)
+        : context_(context), factory_(factory), text_(text), scene_(scene), glowPass_(glowPass), artwork_(artwork) {
         Check(context_->CreateSolidColorBrush(Color::Label, brush_.GetAddressOf()), "Create content brush");
         auto properties = D2D1::StrokeStyleProperties();
         properties.startCap = properties.endCap = properties.dashCap = D2D1_CAP_STYLE_ROUND;
@@ -143,6 +144,7 @@ private:
         Accent(rect);
     }
     void Ring(D2D1_RECT_F rect, float fraction, float stroke, D2D1_COLOR_F color, bool glow);
+    void Artwork(D2D1_ROUNDED_RECT rect);
     void Header(unsigned tab);
     void Dormant();
     void Compact();
@@ -174,6 +176,7 @@ private:
     TextStyles& text_;
     const Scene& scene_;
     bool glowPass_;
+    ID2D1Bitmap1* artwork_;
     ComPtr<ID2D1SolidColorBrush> brush_;
     ComPtr<ID2D1StrokeStyle> round_;
     ComPtr<ID2D1StrokeStyle> join_;
@@ -349,9 +352,25 @@ void LayoutPainter::Dormant() {
     dot.a *= opacity;
     Fill(Idle::Status, dot);
 }
+void LayoutPainter::Artwork(D2D1_ROUNDED_RECT rect) {
+    if (!artwork_ || scene_.demo) { Fill(rect, Demo::ArtworkPlaceholder); return; }
+    rect.rect = Snap(rect.rect);
+    Box(rect.rect);
+    if (glowPass_) return;
+    ComPtr<ID2D1RoundedRectangleGeometry> mask;
+    Check(factory_->CreateRoundedRectangleGeometry(rect, mask.GetAddressOf()), "Create artwork clip");
+    const auto size = artwork_->GetSize();
+    const float side = (std::min)(size.width, size.height);
+    const D2D1_RECT_F source{(size.width - side) * WindowSpec::Half,
+        (size.height - side) * WindowSpec::Half, (size.width + side) * WindowSpec::Half,
+        (size.height + side) * WindowSpec::Half};
+    context_->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), mask.Get()), nullptr);
+    context_->DrawBitmap(artwork_, rect.rect, PaintSpec::Unit, D2D1_INTERPOLATION_MODE_LINEAR, source);
+    context_->PopLayer();
+}
 void LayoutPainter::Compact() {
     namespace C = NotchIsland::Compact;
-    Fill(C::Art, Demo::ArtworkPlaceholder);
+    Artwork(C::Art);
     Box(C::Wave);
     const D2D1_ROUNDED_RECT bars[]{C::Bar0, C::Bar1, C::Bar2, C::Bar3};
     for (std::size_t i = 0; i < std::size(bars); ++i) {
@@ -379,20 +398,31 @@ void LayoutPainter::Compact() {
 void LayoutPainter::NowPlaying() {
     using namespace ExpandedNowPlaying;
     const auto& track = Demo::Tracks[Demo::InitialTrack];
-    const float progress = static_cast<float>(Demo::ElapsedSeconds) / track.durationSeconds;
-    Fill(Art, Demo::ArtworkPlaceholder);
-    Text(track.title, Typography::Role::MediaTitle, Title, Color::Label);
-    Text(track.artist, Typography::Role::Artist, Artist, Color::Label2);
+    const auto* media = scene_.media.get();
+    const bool available = media && media->available;
+    const double duration = scene_.demo ? track.durationSeconds : available ? media->durationSeconds : 0.0;
+    const double elapsed = scene_.demo ? Demo::ElapsedSeconds : available ? media->positionSeconds : 0.0;
+    const float progress = duration > 0 ? Unit(static_cast<float>(elapsed / duration)) : 0.0f;
+    Artwork(Art);
+    Text(scene_.demo ? std::wstring_view(track.title) : available ? std::wstring_view(media->title) : L"No media",
+        Typography::Role::MediaTitle, Title, Color::Label);
+    Text(scene_.demo ? std::wstring_view(track.artist) : available ? std::wstring_view(media->artist) : L"",
+        Typography::Role::Artist, Artist, Color::Label2);
     Box(ScrubHit);
-    Bar(ScrubTrack, progress);
+    if (duration > 0) Bar(ScrubTrack, progress);
     auto knob = Knob;
     const float displacement = (ScrubTrack.rect.right - ScrubTrack.rect.left) * progress;
     knob.rect.left += displacement;
     knob.rect.right += displacement;
-    Fill(knob, Color::Label);
-    Text(Time(Demo::ElapsedSeconds), Typography::Role::Timestamp, Elapsed, Color::Label3);
-    Text(L"\u2212" + Time(track.durationSeconds - Demo::ElapsedSeconds), Typography::Role::Timestamp,
-        Remain, Color::Label3, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    if (duration > 0) Fill(knob, Color::Label);
+    const auto timestamp = [](double seconds) {
+        // GSMTC TimeSpan can exceed unsigned seconds; clamp before the numeric conversion.
+        return Time(static_cast<unsigned>(std::clamp(seconds, 0.0,
+            static_cast<double>((std::numeric_limits<unsigned>::max)()))));
+    };
+    Text(duration > 0 ? timestamp(elapsed) : L"--:--", Typography::Role::Timestamp, Elapsed, Color::Label3);
+    Text(duration > 0 ? L"\u2212" + timestamp((std::max)(0.0, duration - elapsed)) : L"--:--",
+        Typography::Role::Timestamp, Remain, Color::Label3, DWRITE_TEXT_ALIGNMENT_TRAILING);
     MediaGlyph(Prev.rect, -1);
     MediaGlyph(Play.rect, 0);
     MediaGlyph(Next.rect, 1);
@@ -492,7 +522,25 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
     context->GetDevice(device.GetAddressOf());
     if (device.Get() != shadowDevice_.Get()) {
         shadow_.Reset();
+        artwork_.Reset();
+        artworkSource_.reset();
         shadowDevice_ = device;
+    }
+    const auto source = !scene.demo && scene.media ? scene.media->artwork : nullptr;
+    if (source != artworkSource_) {
+        artwork_.Reset();
+        artworkSource_.reset();
+        if (source) {
+            if (!source->width || !source->height || source->width > 256 || source->height > 256 ||
+                source->pixels.size() != static_cast<std::size_t>(source->width) * source->height * 4) {
+                throw std::runtime_error("Invalid decoded media artwork");
+            }
+            const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            Check(context->CreateBitmap(D2D1::SizeU(source->width, source->height), source->pixels.data(),
+                source->width * 4, properties, artwork_.GetAddressOf()), "Upload media artwork");
+        }
+        artworkSource_ = source;
     }
     if (Unit(geom.shadow) > PaintSpec::Zero) {
         const bool same = shadow_ && geom.width == shadowGeometry_.width &&
@@ -519,12 +567,12 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
 
     std::vector<D2D1_RECT_F> bounds;
     auto content = [&](const ContentLayer& layer, bool collectBounds) -> ComPtr<ID2D1Image> {
-        LayoutPainter glowPainter(context, geometry.Factory(), text_, scene, true);
+        LayoutPainter glowPainter(context, geometry.Factory(), text_, scene, true, artwork_.Get());
         auto glowMask = Record(context, [&] { glowPainter.Draw(layer); });
         auto glowColor = scene.accentColor;
         glowColor.a = Color::Glow.a;
         auto glow = Shadow(context, glowMask.Get(), PaintSpec::GlowSigma, glowColor, scene.animating);
-        LayoutPainter painter(context, geometry.Factory(), text_, scene, false);
+        LayoutPainter painter(context, geometry.Factory(), text_, scene, false, artwork_.Get());
         auto commands = Record(context, [&] {
             context->DrawImage(glow.Get(), PaintSpec::GlowOffset);
             painter.Draw(layer);

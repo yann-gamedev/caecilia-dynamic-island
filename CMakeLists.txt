@@ -15,6 +15,7 @@ add_executable(CaeciliaNotchIsland WIN32
     src/render/Painter.cpp
     src/render/TextStyles.cpp
     src/data/DemoSource.cpp
+    src/data/MediaSource.cpp
     src/motion/Spring.cpp
     src/state/StateMachine.cpp
     src/input/HoverTracker.cpp
@@ -27,10 +28,9 @@ target_compile_definitions(CaeciliaNotchIsland PRIVATE
 target_compile_options(CaeciliaNotchIsland PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
 target_include_directories(CaeciliaNotchIsland PRIVATE src)
 target_link_libraries(CaeciliaNotchIsland PRIVATE
-    d3d11 dxgi d2d1 dcomp dwrite dxguid uuid user32 gdi32 ole32 shell32 runtimeobject)
+    d3d11 dxgi d2d1 dcomp dwrite dxguid uuid user32 gdi32 ole32 shell32 runtimeobject windowsapp windowscodecs)
 
-# M0 uses Windows SDK COM/WinRT ABI interfaces (native JSON). C++/WinRT is needed by the M2
-# media implementation; this optional local path does not fetch packages.
+# M2 uses SDK C++/WinRT projections. This optional local override never fetches packages.
 set(CAECILIA_CPPWINRT_INCLUDE_DIR "" CACHE PATH "Offline C++/WinRT include folder (contains winrt/base.h)")
 if(CAECILIA_CPPWINRT_INCLUDE_DIR)
     if(NOT EXISTS "${CAECILIA_CPPWINRT_INCLUDE_DIR}/winrt/base.h")
@@ -71,6 +71,13 @@ if(BUILD_TESTING)
     target_include_directories(CaeciliaRenderTests PRIVATE src)
     target_link_libraries(CaeciliaRenderTests PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs dxguid uuid user32 ole32)
     add_test(NAME render COMMAND CaeciliaRenderTests "${CMAKE_CURRENT_SOURCE_DIR}/artifacts/m1-validation/render")
+    add_executable(CaeciliaMediaTests tests/MediaTests.cpp src/data/MediaSource.cpp)
+    target_compile_features(CaeciliaMediaTests PRIVATE cxx_std_20)
+    target_compile_definitions(CaeciliaMediaTests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(CaeciliaMediaTests PRIVATE /W4 /WX /permissive- /utf-8 /EHsc)
+    target_include_directories(CaeciliaMediaTests PRIVATE src)
+    target_link_libraries(CaeciliaMediaTests PRIVATE windowsapp windowscodecs ole32)
+    add_test(NAME media COMMAND CaeciliaMediaTests)
     find_program(NODE_EXECUTABLE node)
     if(NODE_EXECUTABLE)
         add_test(NAME spec-consistency COMMAND "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/verify-spec.cjs")
