@@ -9,6 +9,7 @@
 #include "input/HoverTracker.h"
 #include <filesystem>
 #include <chrono>
+#include <optional>
 
 namespace caecilia {
 struct AppOptions {
@@ -32,9 +33,11 @@ private:
     void OnBoundsToggle() override;
     void OnFpsToggle() override;
     void OnResume() override;
+    void OnSettingChange() override;
     void OnPointer(bool inside) override;
-    void OnClick(D2D1_POINT_2F point) override;
-    void OnMiddleClick() override;
+    ClickTarget ClickTargetAt(D2D1_POINT_2F point, bool middle) const override;
+    void OnClick(ClickTarget target) override;
+    void OnMiddleClick();
     void OnOutsideMouseDown() override;
     void OnDemoKey(UINT key) override;
     void OnFailure(const char* message) noexcept override;
@@ -58,6 +61,7 @@ private:
     double lastPresent_{};
     double fadeStart_{};
     double tabAccumulator_{};
+    std::optional<double> clockDeadline_; // Next minute boundary; set only while Expanded is shown.
     float outgoingStartOpacity_{};
     NotchIsland::SpringValue tabSpring_{NotchIsland::ExpandedNowPlaying::TabSel.rect.left,
                                       NotchIsland::PaintSpec::Zero,

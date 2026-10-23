@@ -67,7 +67,7 @@ void StateMachine::Unpin() noexcept {
 
 void StateMachine::CloseMedia(double now) noexcept {
     SetBase(IslandState::Dormant, now);
-    pinned_ = false;
+    Unpin(); // Also clear delayed hover and suppress reopening until the pointer leaves.
 }
 
 void StateMachine::TriggerHud(HudKind kind, double now) noexcept {

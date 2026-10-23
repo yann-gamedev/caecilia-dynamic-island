@@ -2,6 +2,7 @@
 #include "app/Errors.h"
 #include <shellapi.h>
 #include "app/Config.h"
+#include "app/Clock.h"
 #include <string>
 #include <string_view>
 #include <utility>
@@ -55,9 +56,6 @@ App::~App() {
 
 namespace {
 using namespace NotchIsland;
-bool Hit(D2D1_RECT_F rect, D2D1_POINT_2F point) noexcept {
-    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
-}
 float ClampUnit(double value) noexcept {
     return static_cast<float>(std::clamp(value, static_cast<double>(PaintSpec::Zero),
                                         static_cast<double>(PaintSpec::Unit)));
@@ -76,6 +74,11 @@ float Ease(float x) noexcept {
     }
     return cubic((lo + hi) * WindowSpec::Half, curve[1], curve[3]);
 }
+bool ReducedMotion() {
+    BOOL animations = TRUE;
+    CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
+    return animations == FALSE;
+}
 }
 
 double App::Now() const noexcept {
@@ -87,9 +90,7 @@ int App::Run(HINSTANCE instance) {
     painter_.Initialize(options_.userConfig.titleFont);
     scene_.accentColor = options_.userConfig.accentColor;
     scene_.mediaActive = demo_.MediaActive();
-    BOOL animations = TRUE;
-    CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
-    scene_.reducedMotion = animations == FALSE;
+    scene_.reducedMotion = ReducedMotion();
     window_.Create(instance, geometry_, *this, options_.userConfig.monitorIndex);
     if (options_.demo) { window_.EnableDemoKeyboard(); }
     window_.Show();
@@ -131,6 +132,7 @@ int App::Run(HINSTANCE instance) {
 DWORD App::DeadlineWait(double now) const noexcept {
     std::optional<double> deadline = state_.NextDeadline();
     if (const auto hover = hover_.NextDeadline(); hover && (!deadline || *hover < *deadline)) { deadline = hover; }
+    if (clockDeadline_ && (!deadline || *clockDeadline_ < *deadline)) { deadline = clockDeadline_; }
     if (!deadline) { return INFINITE; }
     const double milliseconds = std::ceil((std::max)(0.0, *deadline - now) * Motion::MillisecondsPerSecond);
     return static_cast<DWORD>((std::min)(milliseconds, static_cast<double>(INFINITE - 1)));
@@ -207,6 +209,14 @@ void App::Tick(double now) {
          (scene_.hasOutgoing && scene_.outgoing.state == IslandState::Compact));
     scene_.animating = !springs_.Settled() || !IsSettled(tabSpring_) || fading_ || wave;
     if (wasMoving) { dirty_ = true; } // includes the final settled IDLE frame
+    // Header clock: one wake-up per minute boundary, only while Expanded is shown.
+    if (scene_.incoming.state != IslandState::Expanded) { clockDeadline_.reset(); }
+    else if (!clockDeadline_ || now >= *clockDeadline_) {
+        if (clockDeadline_) { dirty_ = true; }
+        SYSTEMTIME local{};
+        GetLocalTime(&local); // Still in the old minute after an early wake: re-arms in a few ms.
+        clockDeadline_ = now + MsToNextMinute(local) / Motion::MillisecondsPerSecond;
+    }
 }
 
 void App::Render(double now) {
@@ -235,15 +245,17 @@ void App::Render(double now) {
     }
 }
 
-void App::OnDraw() { dirty_ = true; deviceUnavailable_ = false; }
+void App::OnDraw() { dirty_ = true; deviceUnavailable_ = false; clockDeadline_.reset(); }
 void App::OnBoundsToggle() { options_.debugBounds = !options_.debugBounds; OnDraw(); }
 void App::OnFpsToggle() { options_.showDebugFps = !options_.showDebugFps; OnDraw(); }
-void App::OnResume() {
-    renderer_.Reset(); recoveryAttempts_ = 0;
-    BOOL animations = TRUE;
-    CheckWin32(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0), "Read reduced motion");
-    scene_.reducedMotion = animations == FALSE;
-    OnDraw();
+void App::OnResume() { renderer_.Reset(); recoveryAttempts_ = 0; OnDraw(); }
+void App::OnSettingChange() {
+    // Settings broadcasts are frequent; only a real reduced-motion flip repaints, never a GPU reset.
+    const bool reduced = ReducedMotion();
+    if (reduced == scene_.reducedMotion) { return; }
+    scene_.reducedMotion = reduced;
+    Transition(Now()); // Drops or restores Hover Swell; Tick snaps springs.
+    dirty_ = true;
 }
 void App::OnPointer(bool inside) {
     const double now = Now();
@@ -263,33 +275,24 @@ void App::OnOutsideMouseDown() {
     state_.Unpin();
     Transition(Now());
 }
-void App::OnClick(D2D1_POINT_2F point) {
+ClickTarget App::ClickTargetAt(D2D1_POINT_2F point, bool middle) const {
+    return TargetAt(point, state_.Current(), scene_.incoming.tab, scene_.geometry.width, window_.Dpi(), middle);
+}
+void App::OnClick(ClickTarget target) {
     const double now = Now();
-    const auto current = state_.Current();
-    if (current == IslandState::Dormant || current == IslandState::Compact) {
-        state_.Pin(); Transition(now); return;
-    }
-    if (current != IslandState::Expanded) { return; }
-    // Body point -> content point (content origin is centered, DESIGN 5.1).
-    point.x -= (scene_.geometry.width - kGeomExpanded.width) * WindowSpec::Half;
-    using namespace ExpandedNowPlaying;
-    const D2D1_RECT_F tabs[] = {Tab0, Tab1, Tab2};
-    const unsigned activeTab = scene_.incoming.tab;
-    bool control = std::any_of(std::begin(tabs), std::end(tabs), [&](auto r) { return Hit(r, point); });
-    if (activeTab == 0) {
-        for (const auto r : {Prev.rect, Play.rect, Next.rect, ScrubHit}) { control = control || Hit(r, point); }
-    } else if (activeTab == 2) {
-        for (const auto& t : {ExpandedDropTray::Tile0, ExpandedDropTray::Tile1, ExpandedDropTray::Tile2}) {
-            control = control || Hit(t.rect, point);
-        }
-    }
-    if (!control) { // Empty area toggles the pin (DESIGN 9).
+    switch (target) {
+    case ClickTarget::MiddlePlay: OnMiddleClick(); return;
+    case ClickTarget::Dormant: case ClickTarget::Compact: state_.Pin(); Transition(now); return;
+    case ClickTarget::Background: // Empty area toggles the pin (DESIGN 9).
         if (state_.Pinned()) { state_.Unpin(); } else { state_.Pin(); }
         Transition(now);
         return;
+    case ClickTarget::Tab0: case ClickTarget::Tab1: case ClickTarget::Tab2: break;
+    default: return; // Media/scrub/file controls are presentation-only in M1.
     }
-    for (unsigned tab = 0; tab < std::size(tabs); ++tab) {
-        if (!Hit(tabs[tab], point) || scene_.incoming.tab == tab) { continue; }
+    if (state_.Current() != IslandState::Expanded) { return; }
+    const unsigned tab = static_cast<unsigned>(target) - static_cast<unsigned>(ClickTarget::Tab0);
+    if (scene_.incoming.tab != tab) {
         scene_.outgoing = scene_.incoming;
         outgoingStartOpacity_ = scene_.outgoing.opacity;
         scene_.hasOutgoing = true;
@@ -299,7 +302,6 @@ void App::OnClick(D2D1_POINT_2F point) {
         fadeStart_ = now; lastTick_ = now; fading_ = true;
         tabSpring_.target = ExpandedNowPlaying::TabSel.rect.left + ExpandedNowPlaying::TabStride * static_cast<float>(tab);
         dirty_ = true;
-        break;
     }
 }
 void App::OnDemoKey(UINT key) {
