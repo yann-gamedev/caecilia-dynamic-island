@@ -49,6 +49,7 @@ App::App(AppOptions options) : options_(std::move(options)),
     demo_(options_.demo && options_.demoMediaActive), hover_(options_.userConfig.hoverDelayMs) {}
 
 App::~App() {
+    media_.Stop();
     // DComp references must be released before the target HWND is destroyed.
     renderer_.Reset();
     window_.Close();
@@ -89,10 +90,12 @@ int App::Run(HINSTANCE instance) {
     geometry_.Initialize();
     painter_.Initialize(options_.userConfig.titleFont);
     scene_.accentColor = options_.userConfig.accentColor;
+    scene_.demo = options_.demo;
     scene_.mediaActive = demo_.MediaActive();
     scene_.reducedMotion = ReducedMotion();
     window_.Create(instance, geometry_, *this, options_.userConfig.monitorIndex);
     if (options_.demo) { window_.EnableDemoKeyboard(); }
+    else { media_.Start(); }
     window_.Show();
     lastTick_ = Now();
     bool quit = false;
@@ -105,6 +108,14 @@ int App::Run(HINSTANCE instance) {
         }
         if (quit || failed_) { break; }
         const double now = Now();
+        if (!options_.demo) {
+            if (auto snapshot = media_.Take()) {
+                scene_.media = std::move(snapshot);
+                scene_.mediaActive = scene_.media->available && scene_.media->playing;
+                // ponytail: M2.1 is data-only; automatic Compact/pause grace arrives in M2.2.
+                dirty_ = true;
+            }
+        }
         Tick(now);
         const bool needsFrame = !deviceUnavailable_ && (dirty_ || scene_.animating);
         const HANDLE frame = renderer_.FrameReady();
@@ -112,16 +123,21 @@ int App::Run(HINSTANCE instance) {
             Render(now);
             continue;
         }
-        const DWORD count = needsFrame && frame ? 1u : 0u;
-        const DWORD result = MsgWaitForMultipleObjectsEx(count, count ? &frame : nullptr,
+        HANDLE handles[2]{};
+        DWORD count = 0;
+        const bool waitForFrame = needsFrame && frame;
+        if (waitForFrame) { handles[count++] = frame; }
+        if (!options_.demo) { handles[count++] = media_.Changed(); }
+        const DWORD result = MsgWaitForMultipleObjectsEx(count, handles,
             DeadlineWait(now), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-        if (result == WAIT_FAILED) { CheckWin32(FALSE, "Wait for frame or input"); }
-        if (count && result == WAIT_OBJECT_0) {
+        if (result == WAIT_FAILED) { CheckWin32(FALSE, "Wait for frame, media or input"); }
+        if (waitForFrame && result == WAIT_OBJECT_0) {
             const double ready = Now();
             Tick(ready);
             Render(ready);
         }
     }
+    media_.Stop();
     char count[96]{};
     std::snprintf(count, sizeof(count), "Session Present count: %llu",
                   static_cast<unsigned long long>(renderer_.PresentCount()));

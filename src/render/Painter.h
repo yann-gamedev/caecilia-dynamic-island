@@ -11,6 +11,8 @@ public:
     void Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const Scene& scene);
 private:
     TextStyles text_;
+    std::shared_ptr<const MediaArtwork> artworkSource_;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> artwork_;
     Microsoft::WRL::ComPtr<ID2D1Device> shadowDevice_;
     Microsoft::WRL::ComPtr<ID2D1Effect> shadow_;
     NotchIsland::IslandGeom shadowGeometry_{};

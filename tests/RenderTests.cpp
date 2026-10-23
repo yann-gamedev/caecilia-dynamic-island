@@ -159,6 +159,33 @@ void Run(const std::filesystem::path& root) {
             capture((std::string(names[tab]) + "-bounds").c_str(), scene);
             scene.bounds = false;
         }
+        scene.demo = false;
+        scene.incoming.tab = 0;
+        scene.tabPosition = tabs[0];
+        const auto emptyMedia = capture("media-empty", scene);
+        auto media = std::make_shared<MediaSnapshot>();
+        media->available = true;
+        media->title = L"Live metadata \u2014 \u65e5\u672c\u8a9e";
+        media->artist = L"Test artist";
+        media->durationSeconds = 240;
+        media->positionSeconds = 60;
+        auto art = std::make_shared<MediaArtwork>();
+        art->width = art->height = 2;
+        art->pixels = {0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255};
+        media->artwork = art;
+        scene.media = media;
+        const auto liveMedia = capture("media-live", scene);
+        Require(liveMedia != emptyMedia, "Live metadata/artwork must replace the empty view");
+        const auto origin = BodyOrigin(scene.geometry.width, resolution, resolution);
+        const auto artX = static_cast<UINT>((origin.x + ExpandedNowPlaying::Art.rect.left + 32) * resolution / 96);
+        const auto artY = static_cast<UINT>(78 * resolution / 96);
+        const auto pixel = (static_cast<std::size_t>(artY) * width + artX) * 4;
+        Require(liveMedia[pixel + 2] == 255 && liveMedia[pixel + 1] == 0 && liveMedia[pixel] == 0,
+            "Decoded BGRA artwork must render in the album rect");
+        scene.media.reset();
+        const auto clearedMedia = capture("media-cleared", scene);
+        Require(clearedMedia[pixel + 1] != 0, "Session removal must clear cached artwork");
+        scene.demo = true;
         scene.incoming.state = IslandState::Hud;
         scene.geometry = GeometryFor(scene.incoming.state);
         const HudKind kinds[]{HudKind::Volume, HudKind::Brightness, HudKind::Pomodoro};
@@ -169,7 +196,7 @@ void Run(const std::filesystem::path& root) {
         }
     }
     // ponytail: production Expanded reads the wall clock; inject a clock only if golden-image comparisons are added.
-    std::puts("PASS: 42 WARP/D2D PNGs, dimensions, alpha envelope, normal/reduced Compact time samples.\n"
+    std::puts("PASS: 51 WARP/D2D PNGs, dimensions, alpha envelope, normal/reduced Compact, media artwork and clearing.\n"
         "Offscreen SetDpi coverage only: NOT GetDpiForWindow/WM_DPICHANGED or desktop composition.");
 }
 }

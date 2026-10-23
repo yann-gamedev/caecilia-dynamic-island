@@ -5,6 +5,7 @@
 #include "render/Painter.h"
 #include "render/Scene.h"
 #include "data/DemoSource.h"
+#include "data/MediaSource.h"
 #include "motion/Spring.h"
 #include "input/HoverTracker.h"
 #include <filesystem>
@@ -52,6 +53,7 @@ private:
     Renderer renderer_;
     OverlayWindow window_;
     DemoSource demo_;
+    MediaSource media_;
     StateMachine state_;
     HoverTracker hover_;
     IslandSprings springs_;

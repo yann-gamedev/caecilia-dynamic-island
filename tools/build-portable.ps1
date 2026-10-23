@@ -2,6 +2,7 @@ param(
     [string]$Compiler = 'C:\msys64\ucrt64\bin\g++.exe'
 )
 $ErrorActionPreference = 'Stop'
+throw 'M2 requires MSVC and Windows SDK C++/WinRT. Use the README MSVC build; this script is retained for the historical M1 recipe.'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {

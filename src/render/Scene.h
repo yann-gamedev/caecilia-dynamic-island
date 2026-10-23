@@ -1,6 +1,7 @@
 #pragma once
 #include "state/StateMachine.h"
 #include "spec/NotchIslandSpec.h"
+#include "data/MediaSnapshot.h"
 
 namespace caecilia {
 struct ContentLayer {
@@ -20,6 +21,8 @@ struct Scene {
     bool fpsVisible{};
     bool animating{};
     bool mediaActive{};
+    bool demo{true}; // Offscreen M1 fixtures retain their deterministic samples.
+    std::shared_ptr<const MediaSnapshot> media;
     bool reducedMotion{};
     float fps{};
     float tabPosition{NotchIsland::ExpandedNowPlaying::TabSel.rect.left};

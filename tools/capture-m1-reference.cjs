@@ -3,9 +3,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
+const prototype = process.argv[2];
+if (!prototype) {
+  console.error('Usage: node tools/capture-m1-reference.cjs <external-prototype.html>');
+  process.exit(1);
+}
+let html = fs.readFileSync(prototype, 'utf8');
 const out = path.resolve('artifacts/m1-validation/reference');
 fs.mkdirSync(out, {recursive:true});
-let html = fs.readFileSync('Caecilia Notch Island.html','utf8');
 html = html.replace("useState(true);\n  const [inspect", "useState(false);\n  const [inspect")
   .replace('const [inspect, setInspect] = useState(true)', 'const [inspect, setInspect] = useState(false)')
   .replace('useState(() => (window.innerWidth >= 1180 ? 2 : 1))','useState(1)')
