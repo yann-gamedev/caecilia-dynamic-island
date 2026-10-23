@@ -84,8 +84,8 @@ Data is **fictional and static** in M1: media controls, seeking, real files,
 telemetry polling and system volume/brightness actions arrive in later milestones.
 The clock samples local time when rendering; it does not have a periodic M1 timer.
 
-With Windows animation effects off, shapes/tab positions snap, waves stop at the
-minimum height, and both fades take 100 ms with no delay or blur.
+With Windows animation effects off, shapes/tab positions snap, waves become static
+10-DIP bars, and both fades take 100 ms with no delay or blur.
 
 ## Options and shutdown
 

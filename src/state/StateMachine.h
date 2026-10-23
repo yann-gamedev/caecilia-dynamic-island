@@ -4,7 +4,7 @@
 #include <optional>
 
 namespace caecilia {
-enum class IslandState { Dormant, Compact, Expanded, Hud };
+enum class IslandState { Dormant = 1, Compact, Expanded, Hud };
 enum class HudKind { Volume, Brightness, Pomodoro };
 
 const NotchIsland::IslandGeom& GeometryFor(IslandState state) noexcept;

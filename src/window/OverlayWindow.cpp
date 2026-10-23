@@ -119,6 +119,7 @@ void OverlayWindow::Show() {
 void OverlayWindow::Reposition() {
     if (positioning_) { return; }
     positioning_ = true;
+    CancelClick(); // A moved/rescaled window invalidates the pressed target.
     try {
         const auto monitor = SelectMonitor(monitorIndex_);
         dpi_ = GetDpiForWindow(hwnd_);
@@ -145,11 +146,8 @@ void OverlayWindow::Reposition() {
 
 D2D1_POINT_2F OverlayWindow::BodyPoint(POINT screen) const {
     CheckWin32(ScreenToClient(hwnd_, &screen), "ScreenToClient");
-    using namespace NotchIsland;
-    const float inverseScale = WindowSpec::DpiBase / static_cast<float>(dpi_);
-    const float offset = (WindowSpec::Width - geometry_->Value().width) * WindowSpec::Half;
-    return {static_cast<float>(screen.x) * inverseScale - offset,
-            static_cast<float>(screen.y) * inverseScale};
+    return BodyPointFromClient({static_cast<float>(screen.x), static_cast<float>(screen.y)},
+        geometry_->Value().width, static_cast<float>(dpi_));
 }
 
 void OverlayWindow::UpdatePointer() {
@@ -207,7 +205,13 @@ LRESULT CALLBACK OverlayWindow::MouseHook(int code, WPARAM wparam, LPARAM lparam
     return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 
+void OverlayWindow::CancelClick() noexcept {
+    click_.Cancel();
+    if (hwnd_ && GetCapture() == hwnd_ && !ReleaseCapture()) { Log("ReleaseCapture failed"); }
+}
+
 void OverlayWindow::Close() noexcept {
+    CancelClick();
     if (mouseHook_) {
         if (!UnhookWindowsHookEx(mouseHook_)) { Log("UnhookWindowsHookEx failed"); }
         mouseHook_ = nullptr;
@@ -300,19 +304,25 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_MOUSELEAVE:
         trackingLeave_ = false;
         UpdatePointer(); return 0;
-    case WM_LBUTTONUP: {
-        POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        CheckWin32(ClientToScreen(hwnd_, &screen), "ClientToScreen click");
-        const auto point = BodyPoint(screen);
-        if (geometry_->Contains(point)) { events_->OnClick(point); }
+    case WM_LBUTTONDOWN: case WM_MBUTTONDOWN:
+    case WM_LBUTTONUP: case WM_MBUTTONUP: {
+        // Client coords stay valid (possibly negative) while captured outside the window.
+        const bool middle = message == WM_MBUTTONDOWN || message == WM_MBUTTONUP;
+        const auto point = BodyPointFromClient({static_cast<float>(GET_X_LPARAM(lparam)),
+            static_cast<float>(GET_Y_LPARAM(lparam))}, geometry_->Value().width, static_cast<float>(dpi_));
+        const auto target = dpi_ && geometry_->Contains(point) ? events_->ClickTargetAt(point, middle) : ClickTarget::None;
+        if (message == WM_LBUTTONDOWN || message == WM_MBUTTONDOWN) {
+            click_.Down(target, middle);
+            if (target != ClickTarget::None) { SetCapture(hwnd_); } else { CancelClick(); }
+            return 0;
+        }
+        const bool fire = click_.Up(target, middle);
+        CancelClick(); // Releases capture; the resulting WM_CAPTURECHANGED is a no-op.
+        if (fire) { events_->OnClick(target); }
         return 0;
     }
-    case WM_MBUTTONUP: {
-        POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        CheckWin32(ClientToScreen(hwnd_, &screen), "ClientToScreen middle click");
-        if (geometry_->Contains(BodyPoint(screen))) { events_->OnMiddleClick(); }
-        return 0;
-    }
+    case WM_CAPTURECHANGED: click_.Cancel(); return 0;
+    case WM_CANCELMODE: CancelClick(); return 0;
     case kOutsideDownMessage: {
         const POINT screen{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         if (mouseHook_ && !geometry_->Contains(BodyPoint(screen))) { events_->OnOutsideMouseDown(); }
@@ -352,7 +362,9 @@ LRESULT OverlayWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam)
         if (wparam == kPointerTimer) { KillTimer(hwnd_, kPointerTimer); UpdatePointer(); }
         return 0;
     case WM_SETTINGCHANGE:
-        events_->OnResume(); return 0;
+        events_->OnSettingChange(); return 0;
+    case WM_TIMECHANGE: // Clock or time zone set: repaint and re-arm the minute deadline.
+        events_->OnDraw(); return 0;
     case WM_POWERBROADCAST:
         if (wparam == PBT_APMRESUMEAUTOMATIC || wparam == PBT_APMRESUMESUSPEND) {
             Reposition(); events_->OnResume();

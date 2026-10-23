@@ -18,7 +18,7 @@
 - Pinned key-4 HUD, transient 1800 ms HUD refresh, return to base/hover state.
 - Incoming delayed cubic fade/blur and outgoing linear fade; tab pill spring.
 - All static demo layouts: Compact, three Expanded tabs, Volume/Brightness/Pomodoro.
-- Reduced motion: snap shapes/tab, static minimum waveform, 100 ms fades without delay/blur.
+- Reduced motion: snap shapes/tab, static 10-DIP waveform bars, 100 ms fades without delay/blur.
 - Dynamic bounds and independent FPS/IDLE; no periodic idle frame/FPS refresh.
 - Frame latency wait handle drives animation pacing; message/deadline wait otherwise.
 - Dynamic FillContainsPoint and transparency follow the actual sprung geometry.
@@ -38,35 +38,55 @@
   `2` Compact, middle click toggles wave without expanding, Compact swell, `C` → Dormant.
 - Code review fixed tab transition consuming pre-click idle time and content glyphs
   accidentally inheriting a previous frame's body/window transform.
-- MSVC `/W4 /WX`, visual animation/alpha-effects correctness and target-machine
-  performance: **not yet verified**. No numerical performance claims.
+- PASS: MSVC 19.51 (VS 2026) Debug + Release `/W4 /WX`; CTest geometry, motion, config,
+  render, spec-consistency in both configs (`cl` need not be on PATH; CMake finds VS).
+- PASS (`tools/verify-m1-desktop.ps1`, 100%, normal and animation-effects-off runs,
+  36 captures in `artifacts/m1-validation/desktop`): 492×193 envelope, overlay never
+  foreground, all states/tabs/HUD kinds, pin/unpin, `C` while hover-expanded → Dormant,
+  clean exit code 0.
+- PASS (`render` CTest, offscreen WARP at 96 and 144 DPI): bitmap 492×193 / 738×290,
+  transparent envelope, reduced Compact frames identical over time, normal ones differ.
+- PASS (`tools/compare-m1-reference.py` vs `tools/capture-m1-reference.cjs` HTML prototype):
+  island silhouette within ≤ 1 px at 96 and 144 DPI for all 8 layouts. Text glyphs are not
+  pixel-compared (DirectWrite vs Chrome rasterize differently).
+- Not verified: real Windows 150% scaling (`GetDpiForWindow`/`WM_DPICHANGED`), multi-monitor,
+  sleep/resume and device loss on hardware, target-machine performance.
+
+## Bugs found and fixed during validation
+
+- `C` (close media) while Expanded via hover stayed Expanded; now clears the hover latch and
+  suppresses re-open until the pointer leaves (test in `MotionTests.cpp`).
+- Filled rect edges were not pixel-snapped at 150% (divider right edge at 484.5 px); fills,
+  accents, divider and the frame origin now snap to device pixels; rim and mask share one origin.
+- `IslandState` numbered 0–3; DESIGN §3 requires 1–4.
 
 ## Local visual checklist
 
 Run `artifacts/M1-portable/Jalankan Demo.bat`; old M0 must not still be running.
-Place the pointer in the island for demo key controls.
+Place the pointer in the island for demo key controls. `[x]` = verified by the scripted
+desktop run at 100%; `[ ]` = still needs a human or hardware.
 
-- [ ] Keys 1/2/3/4 reach all four states; no black rectangular envelope.
-- [ ] 4 remains HUD; V/B/P refresh 1800 ms and restore the appropriate state.
-- [ ] Fast interrupted transitions carry momentum smoothly, without sharp corners.
-- [ ] Hover swells at once, expands after 150 ms; leaving collapses after 250 ms without flicker.
-- [ ] Click pins; outside click unpins and still reaches the app; empty-area click unpins.
-- [ ] Three tabs animate the pill and show correctly placed content/glyphs.
-- [ ] Ctrl+Alt+F12 rects match DESIGN at 100% and 150%; HWND envelope does not animate.
+- [x] Keys 1/2/3/4 reach all four states; no black rectangular envelope.
+- [x] 4 remains HUD; V/B/P refresh 1800 ms and restore the appropriate state.
+- [ ] Fast interrupted transitions carry momentum smoothly, without sharp corners (needs eyes).
+- [x] Hover swells at once, expands after 150 ms; leaving collapses after 250 ms.
+- [x] Click pins; outside click unpins; empty-area click unpins.
+- [x] Three tabs show correctly placed content/glyphs (pill animation smoothness: needs eyes).
+- [ ] Ctrl+Alt+F12 rects match DESIGN at 150% on a real 150% display.
 - [ ] Ctrl+Shift+F shows FPS while moving/waving, then IDLE for settled non-wave states.
 - [ ] Compact active waveform continues; Dormant/Expanded/HUD settle and stop Present.
-- [ ] Transparent area clicks reach other apps during animation; inside clicks never activate.
-- [ ] Windows animation effects off: snaps, no waves/blur, 100 ms content fades.
+- [ ] Transparent area clicks reach other apps during animation (needs a target app).
+- [x] Windows animation effects off: snaps, static bars, no blur.
 - [ ] Resource recreation, sleep/resume and DPI/display changes recover correctly.
 
 ## Boundaries
 
 M1 media/telemetry/levels/files are deterministic **static samples**, not system
 values. Now Playing controls/seek/file operations are presentation-only until later
-milestones. Clock refreshes on render only. No SMTC or other M2 service is started.
+milestones. Clock repaints at each local minute boundary only while Expanded is shown. No SMTC or other M2 service is started.
 
 Rapid repeated content changes keep the newest incoming/outgoing pair rather than
-retaining unbounded historical layers. Exact visual comparison remains pending.
+retaining unbounded historical layers.
 The raw-key observer never records text and does not consume foreground keystrokes.
 
 M0 acceptance was reported by the user; M1 awaits acceptance. Do not start M2.

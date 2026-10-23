@@ -1,6 +1,7 @@
 #include "motion/Spring.h"
 #include "state/StateMachine.h"
 #include "input/HoverTracker.h"
+#include "app/Clock.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -140,6 +141,19 @@ void TestRetargetAndTiming() {
 void TestStateMachine() {
     constexpr double start = Motion::HudMs / Motion::MillisecondsPerSecond;
     constexpr double duration = Motion::HudMs / Motion::MillisecondsPerSecond;
+    static_assert(static_cast<int>(IslandState::Dormant) == 1 && static_cast<int>(IslandState::Hud) == 4);
+    StateMachine closed;
+    closed.SetBase(IslandState::Compact, start);
+    closed.SetHovered(true);
+    closed.SetHoverExpanded(true);
+    closed.CloseMedia(start);
+    Require(closed.Current() == IslandState::Dormant && !closed.Swell(), "Close media must clear hover expansion");
+    closed.SetHoverExpanded(true); // A previously armed enter timer must not reopen it.
+    Require(closed.Current() == IslandState::Dormant, "Close media suppresses hover until exit");
+    closed.SetHovered(false);
+    closed.SetHovered(true);
+    closed.SetHoverExpanded(true);
+    Require(closed.Current() == IslandState::Expanded, "Hover works again after exit/re-entry");
     StateMachine state;
     Require(state.Current() == IslandState::Dormant && !state.NextDeadline(), "Initial state must be idle");
     state.SetBase(IslandState::Compact, start);
@@ -279,6 +293,23 @@ void TestSwellAndPin() {
     s.SetHovered(true);
     Require(s.Swell(), "Outside unpin does not suppress");
 }
+
+void TestClockDeadline() {
+    auto at = [](WORD year, WORD month, WORD day, WORD hour, WORD minute, WORD second, WORD ms) {
+        SYSTEMTIME t{};
+        t.wYear = year; t.wMonth = month; t.wDay = day;
+        t.wHour = hour; t.wMinute = minute; t.wSecond = second; t.wMilliseconds = ms;
+        return MsToNextMinute(t);
+    };
+    Require(at(2026, 10, 23, 12, 34, 0, 0) == 60'000, "Exact boundary waits a full minute");
+    Require(at(2026, 10, 23, 12, 34, 0, 1) == 59'999, "Just after boundary");
+    Require(at(2026, 10, 23, 12, 34, 30, 250) == 29'750, "Mid-minute");
+    Require(at(2026, 10, 23, 12, 34, 59, 999) == 1, "Minute boundary");
+    Require(at(2026, 10, 23, 12, 59, 59, 500) == 500, "Hour boundary");
+    Require(at(2026, 10, 23, 23, 59, 59, 999) == 1, "Day boundary");
+    Require(at(2026, 12, 31, 23, 59, 59, 0) == 1'000, "Year boundary");
+    Require(at(2016, 12, 31, 23, 59, 60, 0) == 1, "Leap second retries shortly");
+}
 } // namespace
 
 int main() {
@@ -288,7 +319,8 @@ int main() {
         TestStateMachine();
         TestHover();
         TestSwellAndPin();
-        std::puts("PASS: spring transitions, retargeting, fixed-step timing, state priority, HUD, hover, swell and pin");
+        TestClockDeadline();
+        std::puts("PASS: spring transitions, retargeting, fixed-step timing, state priority, HUD, hover, swell, pin and clock deadline");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

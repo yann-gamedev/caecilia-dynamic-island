@@ -105,7 +105,15 @@ public:
 private:
     void Box(D2D1_RECT_F rect) { if (!glowPass_) bounds.push_back(rect); }
     ID2D1SolidColorBrush* Brush(D2D1_COLOR_F color) { brush_->SetColor(color); return brush_.Get(); }
+    // DESIGN 2: after DPI scaling, fill edges land on whole device pixels.
+    D2D1_RECT_F Snap(D2D1_RECT_F rect) const {
+        float dpiX{}, dpiY{};
+        context_->GetDpi(&dpiX, &dpiY);
+        return {SnapToPixel(rect.left, dpiX), SnapToPixel(rect.top, dpiY),
+                SnapToPixel(rect.right, dpiX), SnapToPixel(rect.bottom, dpiY)};
+    }
     void Fill(D2D1_ROUNDED_RECT rect, D2D1_COLOR_F color) {
+        rect.rect = Snap(rect.rect);
         Box(rect.rect);
         if (!glowPass_) context_->FillRoundedRectangle(rect, Brush(color));
     }
@@ -118,6 +126,7 @@ private:
         context_->DrawTextLayout({rect.left, rect.top}, layout.Get(), Brush(color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
     void Accent(D2D1_ROUNDED_RECT rect, bool vertical = false, bool active = true) {
+        rect.rect = Snap(rect.rect);
         Box(rect.rect);
         if (glowPass_) {
             if (active) context_->FillRoundedRectangle(rect, Brush(Color::Core));
@@ -308,7 +317,7 @@ void LayoutPainter::Header(unsigned tab) {
         Text(Demo::TabLabels[i], Typography::Role::TabClock, tabs[i], i == tab ? Color::Label : Color::Label2,
             DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
-    // HTML uses the local clock; no timer is created here just to update it.
+    // HTML uses the local clock; App schedules a repaint at each minute boundary while Expanded.
     SYSTEMTIME now{};
     GetLocalTime(&now);
     const auto hours = std::to_wstring(now.wHour);
@@ -387,8 +396,8 @@ void LayoutPainter::NowPlaying() {
     MediaGlyph(Prev.rect, -1);
     MediaGlyph(Play.rect, 0);
     MediaGlyph(Next.rect, 1);
-    Box(Divider);
-    if (!glowPass_) context_->FillRectangle(Divider, Brush(Color::Fill));
+    Box(Snap(Divider));
+    if (!glowPass_) context_->FillRectangle(Snap(Divider), Brush(Color::Fill));
     const D2D1_RECT_F rings[]{CpuRing.rect, RamRing.rect};
     const D2D1_RECT_F labels[]{CpuLabel, RamLabel};
     for (std::size_t i = 0; i < std::size(rings); ++i) {
@@ -533,7 +542,10 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
     ComPtr<ID2D1Image> outgoing;
     if (scene.hasOutgoing && scene.outgoing.opacity > PaintSpec::Zero) outgoing = content(scene.outgoing, false);
     auto incoming = content(scene.incoming, true);
-    const float offset = (WindowSpec::Width - geom.width) * WindowSpec::Half;
+    // Body, rim and content share one pixel-snapped origin so the rim stays on the mask edge.
+    float dpiX{}, dpiY{};
+    context->GetDpi(&dpiX, &dpiY);
+    const auto origin = BodyOrigin(geom.width, dpiX, dpiY);
     auto rimBottom = Color::Rim;
     rimBottom.a = PaintSpec::RimBottomAlpha;
     auto rim = Gradient(context, {PaintSpec::Zero, PaintSpec::Zero}, {PaintSpec::Zero, geom.height}, Color::Rim, rimBottom);
@@ -550,23 +562,13 @@ void Painter::Draw(ID2D1DeviceContext* context, IslandGeometry& geometry, const 
     context->SetTransform(D2D1::Matrix3x2F::Identity());
     context->BeginDraw();
     context->Clear(Color::Transparent);
-    context->SetTransform(D2D1::Matrix3x2F::Translation(offset, WindowSpec::Top));
+    context->SetTransform(D2D1::Matrix3x2F::Translation(origin.x, origin.y));
     if (shadow_ && Unit(geom.shadow) > PaintSpec::Zero) context->DrawImage(shadow_.Get(), PaintSpec::ShadowOffset);
     brush->SetColor(surface);
     context->FillGeometry(geometry.Path(), brush.Get());
     const auto clip = D2D1::LayerParameters1(D2D1::InfiniteRect(), geometry.Path());
     context->PushLayer(clip, nullptr);
-    if (Unit(geom.rim) > PaintSpec::Zero) {
-        // DPI multiplication is only pixel snapping of the stroke origin, never
-        // a second scaling of drawing geometry (SetDpi owns that conversion).
-        float dpiX{}, dpiY{};
-        context->GetDpi(&dpiX, &dpiY);
-        const float snappedX = std::round(offset * dpiX / WindowSpec::DpiBase) * WindowSpec::DpiBase / dpiX;
-        const float snappedY = std::round(WindowSpec::Top * dpiY / WindowSpec::DpiBase) * WindowSpec::DpiBase / dpiY;
-        context->SetTransform(D2D1::Matrix3x2F::Translation(snappedX, snappedY));
-        context->DrawGeometry(geometry.Path(), rim.Get(), PaintSpec::RimStroke);
-        context->SetTransform(D2D1::Matrix3x2F::Translation(offset, WindowSpec::Top));
-    }
+    if (Unit(geom.rim) > PaintSpec::Zero) context->DrawGeometry(geometry.Path(), rim.Get(), PaintSpec::RimStroke);
     // DESIGN 5.1: content origin x = (W_current - W_target) / 2 keeps layouts centered.
     const auto contentX = [&](const ContentLayer& layer) {
         return (geom.width - GeometryFor(layer.state).width) * WindowSpec::Half;

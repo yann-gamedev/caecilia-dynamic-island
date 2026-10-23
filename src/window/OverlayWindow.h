@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <d2d1.h>
+#include "input/ClickGesture.h"
 
 namespace caecilia {
 class IslandGeometry;
@@ -9,10 +10,11 @@ struct WindowEvents {
     virtual void OnDraw() = 0;
     virtual void OnBoundsToggle() = 0;
     virtual void OnFpsToggle() = 0;
-    virtual void OnResume() = 0;
+    virtual void OnResume() = 0;          // Power resume: GPU resources are rebuilt.
+    virtual void OnSettingChange() = 0;   // WM_SETTINGCHANGE: preferences only, no GPU reset.
     virtual void OnPointer(bool inside) = 0;
-    virtual void OnClick(D2D1_POINT_2F point) = 0;
-    virtual void OnMiddleClick() = 0;
+    virtual ClickTarget ClickTargetAt(D2D1_POINT_2F point, bool middle) const = 0;
+    virtual void OnClick(ClickTarget target) = 0;
     virtual void OnOutsideMouseDown() = 0;
     virtual void OnDemoKey(UINT key) = 0;
     virtual void OnFailure(const char* message) noexcept = 0;
@@ -40,6 +42,8 @@ public:
 private:
     static LRESULT CALLBACK Procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept;
     static LRESULT CALLBACK MouseHook(int code, WPARAM wparam, LPARAM lparam) noexcept;
+    void CancelClick() noexcept;
+    ClickGesture click_;
     HHOOK mouseHook_{};
     LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
     HWND hwnd_{};
