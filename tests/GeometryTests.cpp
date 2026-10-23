@@ -49,17 +49,23 @@ int main() {
                 const auto zero = BodyPointFromClient({px, origin.y * scale}, width, dpi);
                 Require(std::fabs(zero.x) < 1e-4f && std::fabs(zero.y) < 1e-4f, "Hit transform differs from paint origin");
             }
-            const auto client = [&](float x, float y) {
-                const auto origin = BodyOrigin(kGeomIdle.width, dpi, dpi);
-                return D2D1::Point2F((x + origin.x) * scale, (y + origin.y) * scale);
-            };
-            const auto hits = [&](float x, float y) {
-                return geometry.Contains(BodyPointFromClient(client(x, y), kGeomIdle.width, dpi));
-            };
-            const float mid = kGeomIdle.width * WindowSpec::Half;
-            Require(hits(mid, kGeomIdle.height - 0.5f), "Inside bottom edge must hit");
-            Require(!hits(mid, kGeomIdle.height + 0.5f), "Below bottom edge must pass through");
-            Require(!hits(-kGeomIdle.earRadius, kGeomIdle.height), "Left envelope corner must pass through");
+            for (const auto& g : {kGeomIdle, kGeomCompact, kGeomExpanded, kGeomHud}) {
+                geometry.Update(g);
+                const auto origin = BodyOrigin(g.width, dpi, dpi);
+                const auto hits = [&](float x, float y) {
+                    const auto client = D2D1::Point2F((x + origin.x) * scale, (y + origin.y) * scale);
+                    return geometry.Contains(BodyPointFromClient(client, g.width, dpi));
+                };
+                const float inset = 0.5f / scale; // Half a physical pixel on either side.
+                const float mid = g.width * WindowSpec::Half;
+                Require(hits(mid, g.height - inset), "Inside bottom edge must hit");
+                Require(!hits(mid, g.height + inset), "Below bottom edge must pass through");
+                Require(hits(mid, inset) && !hits(mid, -inset), "Top boundary must match silhouette");
+                Require(!hits(-g.earRadius, g.height) && !hits(g.width + g.earRadius, g.height),
+                    "Envelope corners must pass through");
+                Require(hits(-g.earRadius * 0.5f, inset), "Filled ear must hit");
+                Require(!hits(-g.earRadius * 0.5f, g.earRadius), "Concave ear cutout must pass through");
+            }
             using namespace ExpandedNowPlaying;
             const auto center = [](D2D1_RECT_F r) { return D2D1::Point2F((r.left + r.right) * 0.5f, (r.top + r.bottom) * 0.5f); };
             using caecilia::ClickTarget; using caecilia::IslandState; using caecilia::TargetAt;
@@ -68,6 +74,18 @@ int main() {
             Require(TargetAt(center(Tab1), IslandState::Expanded, 0, w, dpi, false) == ClickTarget::Tab1, "Tab target");
             Require(TargetAt(center(Play.rect), IslandState::Expanded, 1, w, dpi, false) == ClickTarget::Background,
                 "Hidden-tab controls must not hit");
+            const float inset = 0.5f / scale;
+            Require(TargetAt({Tab1.left - inset, center(Tab1).y}, IslandState::Expanded, 0, w, dpi, false) == ClickTarget::Tab0 &&
+                TargetAt({Tab1.left + inset, center(Tab1).y}, IslandState::Expanded, 0, w, dpi, false) == ClickTarget::Tab1,
+                "Adjacent tab boundary must select the correct side");
+            for (const float currentWidth : {kGeomIdle.width + 3.3f, w - 0.7f, w + 8.0f}) {
+                auto point = center(Tab2);
+                point.x += (currentWidth - w) * WindowSpec::Half;
+                const auto origin = BodyOrigin(currentWidth, dpi, dpi);
+                const auto client = D2D1::Point2F((point.x + origin.x) * scale, (point.y + origin.y) * scale);
+                Require(TargetAt(BodyPointFromClient(client, currentWidth, dpi), IslandState::Expanded,
+                    0, currentWidth, dpi, false) == ClickTarget::Tab2, "Tab target must track morphing content origin");
+            }
         }
         using caecilia::ClickTarget;
         Require(caecilia::TargetAt({}, caecilia::IslandState::Compact, 0, kGeomCompact.width, 96, true) == ClickTarget::MiddlePlay,

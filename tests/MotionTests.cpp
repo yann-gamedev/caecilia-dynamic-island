@@ -138,6 +138,45 @@ void TestRetargetAndTiming() {
     }
 }
 
+void TestRapidTransitions() {
+    IslandSprings springs;
+    IslandState previous = IslandState::Dormant;
+    const std::array sequence{IslandState::Expanded, IslandState::Hud,
+        IslandState::Compact, IslandState::Dormant};
+    for (int event = 0; event < 240; ++event) {
+        const auto next = sequence[static_cast<std::size_t>(event) % sequence.size()];
+        const auto before = springs.Values();
+        springs.SetTarget(GeometryFor(next), SpringFor(previous, next));
+        for (std::size_t i = 0; i < before.size(); ++i) {
+            Require(springs.Values()[i].x == before[i].x && springs.Values()[i].v == before[i].v,
+                "Rapid retarget must preserve every component's position and velocity");
+        }
+        springs.Advance(1.0 / 60.0);
+        for (const auto& value : springs.Values()) {
+            Require(std::isfinite(value.x) && std::isfinite(value.v), "Rapid transitions must stay finite");
+        }
+        const auto g = springs.Value();
+        Require(g.width > 0 && g.height > g.earRadius && g.bottomRadius > 0 && g.earRadius > 0,
+            "Rapid transitions must retain valid outline dimensions");
+        Require(g.width + 2 * g.earRadius < WindowSpec::Width && g.height < WindowSpec::Height,
+            "Rapid outline must remain within the fixed window");
+        previous = next;
+    }
+    Finish(springs, GeometryFor(previous));
+
+    SpringValue tab{ExpandedNowPlaying::TabSel.rect.left, 0, ExpandedNowPlaying::TabSel.rect.left};
+    for (int event = 0; event < 240; ++event) {
+        tab.target = ExpandedNowPlaying::TabSel.rect.left +
+            ExpandedNowPlaying::TabStride * static_cast<float>(event % 3);
+        StepSpring(tab, Spring::ToExpanded, static_cast<float>(Motion::FixedStep));
+        Require(std::isfinite(tab.x) && std::isfinite(tab.v), "Rapid tab changes must stay finite");
+    }
+    for (int step = 0; step < 2400 && !IsSettled(tab); ++step) {
+        StepSpring(tab, Spring::ToExpanded, static_cast<float>(Motion::FixedStep));
+    }
+    Require(IsSettled(tab), "Rapid tab changes must settle at the last target");
+}
+
 void TestStateMachine() {
     constexpr double start = Motion::HudMs / Motion::MillisecondsPerSecond;
     constexpr double duration = Motion::HudMs / Motion::MillisecondsPerSecond;
@@ -316,6 +355,7 @@ int main() {
     try {
         TestTransitions();
         TestRetargetAndTiming();
+        TestRapidTransitions();
         TestStateMachine();
         TestHover();
         TestSwellAndPin();
